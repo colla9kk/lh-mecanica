@@ -1,12 +1,13 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   CarFront, ChevronRight, CircleDollarSign, ClipboardList, Download, FileDown,
   LayoutDashboard, LogOut, Menu, Plus, RefreshCw, Save, Search, Share2, Trash2, UserRound, Users, Wrench, X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { deleteWorkshopRecord, deletionErrorMessage } from "@/lib/deletions";
 import { dateBR, money, normalizePlate, today } from "@/lib/format";
 import { createOrderPdfFile, downloadOrderPdf } from "@/lib/pdf";
 import { Customer, OrderStatus, ServiceItem, ServiceOrder, Vehicle, statusLabels } from "@/lib/types";
@@ -37,7 +38,11 @@ export default function AdminPage() {
       supabase.from("service_orders").select("*, customer:customers(*), vehicle:vehicles(*), items:service_order_items(*)").order("created_at", { ascending: false }),
     ]);
     const firstError = customersResult.error || vehiclesResult.error || ordersResult.error;
-    if (firstError) setError("Não foi possível carregar os dados. Confira a configuração do Supabase.");
+    if (firstError) {
+      setError("Não foi possível atualizar a lista. Confira a conexão e clique em Atualizar.");
+      setLoading(false);
+      return;
+    }
     setCustomers((customersResult.data || []) as Customer[]);
     setVehicles((vehiclesResult.data || []) as unknown as Vehicle[]);
     setOrders((ordersResult.data || []) as unknown as ServiceOrder[]);
@@ -145,14 +150,14 @@ export default function AdminPage() {
           {error && <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
           {tab === "inicio" && <Dashboard customers={customers} vehicles={vehicles} orders={orders} loading={loading} onPlate={() => setTab("placa")} onNewOrder={() => setTab("ordens")} onSelectOrder={setSelectedOrder} />}
           {tab === "placa" && <PlateLookup query={plateSearch} onQuery={setPlateSearch} vehicle={foundVehicle} orders={foundOrders} onNewOrder={newOrderFor} onSelectOrder={setSelectedOrder} />}
-          {tab === "clientes" && <CustomersPanel customers={customers} onSaved={async () => { notify("Cliente cadastrado."); await loadData(); }} onDeleted={async () => { notify("Cliente excluído."); await loadData(); }} onError={setError} />}
-          {tab === "veiculos" && <VehiclesPanel vehicles={vehicles} customers={customers} onSaved={async () => { notify("Veículo cadastrado."); await loadData(); }} onDeleted={async () => { notify("Veículo excluído."); await loadData(); }} onError={setError} onNewOrder={newOrderFor} />}
+          {tab === "clientes" && <CustomersPanel customers={customers} onSaved={async () => { notify("Cliente cadastrado."); await loadData(); }} onDeleted={async (id) => { setCustomers((current) => current.filter((customer) => customer.id !== id)); setVehicles((current) => current.filter((vehicle) => vehicle.customer_id !== id)); await loadData(); notify("Cliente excluído."); }} onError={setError} />}
+          {tab === "veiculos" && <VehiclesPanel vehicles={vehicles} customers={customers} onSaved={async () => { notify("Veículo cadastrado."); await loadData(); }} onDeleted={async (id) => { setVehicles((current) => current.filter((vehicle) => vehicle.id !== id)); await loadData(); notify("Veículo excluído."); }} onError={setError} onNewOrder={newOrderFor} />}
           {tab === "ordens" && <OrdersPanel orders={orders} vehicles={vehicles} presetVehicleId={presetVehicleId} clearPreset={() => setPresetVehicleId("")} onSaved={async () => { notify("Ordem de serviço criada."); await loadData(); }} onError={setError} onSelectOrder={setSelectedOrder} />}
           {tab === "backup" && <BackupPanel customers={customers} vehicles={vehicles} orders={orders} />}
         </section>
       </div>
 
-      {selectedOrder && <OrderDetails order={selectedOrder} onClose={() => setSelectedOrder(null)} onChanged={async () => { await loadData(); setSelectedOrder(null); notify("Ordem atualizada."); }} onDeleted={async () => { await loadData(); setSelectedOrder(null); notify("Ordem excluída."); }} onError={setError} />}
+      {selectedOrder && <OrderDetails order={selectedOrder} onClose={() => setSelectedOrder(null)} onChanged={async () => { await loadData(); setSelectedOrder(null); notify("Ordem atualizada."); }} onDeleted={async () => { setOrders((current) => current.filter((order) => order.id !== selectedOrder.id)); setSelectedOrder(null); await loadData(); notify("Ordem excluída."); }} onError={setError} />}
     </main>
   );
 }
@@ -195,9 +200,10 @@ function PlateLookup({ query, onQuery, vehicle, orders, onNewOrder, onSelectOrde
   </>;
 }
 
-function CustomersPanel({ customers, onSaved, onDeleted, onError }: { customers: Customer[]; onSaved: () => void; onDeleted: () => void; onError: (e: string) => void }) {
+function CustomersPanel({ customers, onSaved, onDeleted, onError }: { customers: Customer[]; onSaved: () => void; onDeleted: (id: string) => Promise<void>; onError: (e: string) => void }) {
   const [showForm, setShowForm] = useState(false);
   const [deletingId, setDeletingId] = useState("");
+  const deleteLock = useRef(false);
   const [form, setForm] = useState({ name: "", document: "", phone: "", whatsapp: "", email: "", address: "", notes: "" });
 
   async function submit(e: FormEvent) {
@@ -213,75 +219,30 @@ function CustomersPanel({ customers, onSaved, onDeleted, onError }: { customers:
   }
 
   async function deleteCustomer(customer: Customer) {
-    if (deletingId) return;
-    const confirmed = window.confirm(`Excluir o cliente "${customer.name}" e os veículos dele que não possuem histórico de OS? Essa ação não pode ser desfeita.`);
+    if (deleteLock.current) return;
+    const confirmed = window.confirm(`Excluir o cliente "${customer.name}" e os veículos dele sem histórico? Clientes com OS vinculadas só podem ser excluídos após remover essas ordens. Essa ação não pode ser desfeita.`);
     if (!confirmed) return;
-
-    setDeletingId(customer.id);
-
-    const { data: customerVehicles, error: vehiclesError } = await supabase
-      .from("vehicles")
-      .select("id, plate")
-      .eq("customer_id", customer.id);
-
-    if (vehiclesError) {
-      setDeletingId("");
-      onError("Não foi possível verificar os veículos deste cliente.");
-      return;
+    deleteLock.current = true; setDeletingId(customer.id); onError("");
+    try {
+      await deleteWorkshopRecord(supabase, "customer", customer.id);
+      await onDeleted(customer.id);
+    } catch (cause) {
+      onError(deletionErrorMessage(cause));
+    } finally {
+      deleteLock.current = false; setDeletingId("");
     }
-
-    const vehicleIds = (customerVehicles || []).map((vehicle) => vehicle.id);
-
-    if (vehicleIds.length) {
-      const { count: orderCount, error: ordersError } = await supabase
-        .from("service_orders")
-        .select("id", { count: "exact", head: true })
-        .in("vehicle_id", vehicleIds);
-
-      if (ordersError) {
-        setDeletingId("");
-        onError("Não foi possível verificar o histórico de ordens deste cliente.");
-        return;
-      }
-
-      if ((orderCount || 0) > 0) {
-        setDeletingId("");
-        onError(`Este cliente possui ${orderCount} ordem(ns) de serviço no histórico. Exclua essas ordens primeiro.`);
-        return;
-      }
-
-      const { error: deleteVehiclesError } = await supabase
-        .from("vehicles")
-        .delete()
-        .eq("customer_id", customer.id);
-
-      if (deleteVehiclesError) {
-        setDeletingId("");
-        onError("Não foi possível excluir os veículos vinculados a este cliente.");
-        return;
-      }
-    }
-
-    const { error } = await supabase.from("customers").delete().eq("id", customer.id);
-    setDeletingId("");
-
-    if (error) {
-      onError("Não foi possível excluir o cliente.");
-      return;
-    }
-
-    onDeleted();
   }
 
   return <><PageTitle eyebrow="Relacionamento" title="Clientes" copy="Cadastre os proprietários antes de adicionar os veículos." action={<button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 rounded-xl bg-[#b91424] px-5 py-3 text-sm font-black text-white"><Plus size={17} /> Novo cliente</button>} />
     {showForm && <form onSubmit={submit} className="mb-7 grid gap-4 rounded-2xl border border-black/8 bg-white p-6 sm:grid-cols-2 xl:grid-cols-3"><Input label="Nome completo" required value={form.name} onChange={(v) => setForm({ ...form, name: v })} /><Input label="CPF ou CNPJ" value={form.document} onChange={(v) => setForm({ ...form, document: v })} /><Input label="Telefone" required value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} /><Input label="WhatsApp" value={form.whatsapp} onChange={(v) => setForm({ ...form, whatsapp: v })} /><Input label="E-mail" type="email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} /><Input label="Endereço" value={form.address} onChange={(v) => setForm({ ...form, address: v })} /><label className="grid gap-2 text-sm font-bold sm:col-span-2 xl:col-span-3">Observações<textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="rounded-xl border border-black/10 p-3" /></label><div className="flex gap-3 sm:col-span-2 xl:col-span-3"><button className="rounded-xl bg-[#111820] px-5 py-3 font-bold text-white">Salvar cliente</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-black/10 px-5 py-3 font-bold">Cancelar</button></div></form>}
-    <div className="overflow-hidden rounded-2xl border border-black/8 bg-white"><div className="overflow-x-auto"><table className="w-full min-w-[800px] text-left"><thead className="bg-[#111820] text-sm text-white"><tr><th className="p-4">Nome</th><th className="p-4">Telefone</th><th className="p-4">Documento</th><th className="p-4">E-mail</th><th className="p-4">Cadastro</th><th className="p-4 text-right">Ações</th></tr></thead><tbody className="divide-y divide-black/7">{customers.map((customer) => <tr key={customer.id}><td className="p-4 font-bold">{customer.name}</td><td className="p-4">{customer.phone}</td><td className="p-4">{customer.document || "—"}</td><td className="p-4">{customer.email || "—"}</td><td className="p-4">{dateBR(customer.created_at)}</td><td className="p-4 text-right"><button disabled={deletingId === customer.id} onClick={() => void deleteCustomer(customer)} className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-black text-red-700 disabled:opacity-50"><Trash2 size={16} /> {deletingId === customer.id ? "Excluindo..." : "Excluir"}</button></td></tr>)}</tbody></table></div>{customers.length === 0 && <Empty text="Nenhum cliente cadastrado." />}</div>
+    <div className="overflow-hidden rounded-2xl border border-black/8 bg-white"><div className="overflow-x-auto"><table className="w-full min-w-[800px] text-left"><thead className="bg-[#111820] text-sm text-white"><tr><th className="p-4">Nome</th><th className="p-4">Telefone</th><th className="p-4">Documento</th><th className="p-4">E-mail</th><th className="p-4">Cadastro</th><th className="p-4 text-right">Ações</th></tr></thead><tbody className="divide-y divide-black/7">{customers.map((customer) => <tr key={customer.id}><td className="p-4 font-bold">{customer.name}</td><td className="p-4">{customer.phone}</td><td className="p-4">{customer.document || "—"}</td><td className="p-4">{customer.email || "—"}</td><td className="p-4">{dateBR(customer.created_at)}</td><td className="p-4 text-right"><button disabled={Boolean(deletingId)} onClick={() => void deleteCustomer(customer)} className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-black text-red-700 disabled:opacity-50"><Trash2 size={16} /> {deletingId === customer.id ? "Excluindo..." : "Excluir"}</button></td></tr>)}</tbody></table></div>{customers.length === 0 && <Empty text="Nenhum cliente cadastrado." />}</div>
   </>;
 }
 
-function VehiclesPanel({ vehicles, customers, onSaved, onDeleted, onError, onNewOrder }: { vehicles: Vehicle[]; customers: Customer[]; onSaved: () => void; onDeleted: () => void; onError: (e: string) => void; onNewOrder: (id: string) => void }) {
+function VehiclesPanel({ vehicles, customers, onSaved, onDeleted, onError, onNewOrder }: { vehicles: Vehicle[]; customers: Customer[]; onSaved: () => void; onDeleted: (id: string) => Promise<void>; onError: (e: string) => void; onNewOrder: (id: string) => void }) {
   const [showForm, setShowForm] = useState(false);
   const [deletingId, setDeletingId] = useState("");
+  const deleteLock = useRef(false);
   const [form, setForm] = useState({ customer_id: "", plate: "", brand: "", model: "", year: "", color: "", mileage: "", fuel: "", chassis: "", notes: "" });
 
   async function submit(e: FormEvent) {
@@ -298,43 +259,23 @@ function VehiclesPanel({ vehicles, customers, onSaved, onDeleted, onError, onNew
   }
 
   async function deleteVehicle(vehicle: Vehicle) {
-    if (deletingId) return;
-    const confirmed = window.confirm(`Excluir o veículo ${vehicle.plate} — ${vehicle.brand} ${vehicle.model}? Essa ação não pode ser desfeita.`);
+    if (deleteLock.current) return;
+    const confirmed = window.confirm(`Excluir o veículo ${vehicle.plate} — ${vehicle.brand} ${vehicle.model}? O cliente será mantido. Se houver OS vinculadas, exclua essas ordens primeiro. Essa ação não pode ser desfeita.`);
     if (!confirmed) return;
-
-    setDeletingId(vehicle.id);
-
-    const { count: orderCount, error: countError } = await supabase
-      .from("service_orders")
-      .select("id", { count: "exact", head: true })
-      .eq("vehicle_id", vehicle.id);
-
-    if (countError) {
-      setDeletingId("");
-      onError("Não foi possível verificar o histórico deste veículo.");
-      return;
+    deleteLock.current = true; setDeletingId(vehicle.id); onError("");
+    try {
+      await deleteWorkshopRecord(supabase, "vehicle", vehicle.id);
+      await onDeleted(vehicle.id);
+    } catch (cause) {
+      onError(deletionErrorMessage(cause));
+    } finally {
+      deleteLock.current = false; setDeletingId("");
     }
-
-    if ((orderCount || 0) > 0) {
-      setDeletingId("");
-      onError(`Este veículo possui ${orderCount} ordem(ns) de serviço vinculada(s). Exclua as ordens primeiro.`);
-      return;
-    }
-
-    const { error } = await supabase.from("vehicles").delete().eq("id", vehicle.id);
-    setDeletingId("");
-
-    if (error) {
-      onError("Não foi possível excluir o veículo. Ele pode estar vinculado a uma ordem de serviço.");
-      return;
-    }
-
-    onDeleted();
   }
 
   return <><PageTitle eyebrow="Frota atendida" title="Veículos" copy="Cada placa mantém seu próprio histórico de ordens." action={<button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 rounded-xl bg-[#b91424] px-5 py-3 text-sm font-black text-white"><Plus size={17} /> Novo veículo</button>} />
     {showForm && <form onSubmit={submit} className="mb-7 grid gap-4 rounded-2xl border border-black/8 bg-white p-6 sm:grid-cols-2 xl:grid-cols-3"><Select label="Proprietário" required value={form.customer_id} onChange={(v) => setForm({ ...form, customer_id: v })} options={customers.map((c) => [c.id, c.name])} /><Input label="Placa" required value={form.plate} onChange={(v) => setForm({ ...form, plate: normalizePlate(v) })} /><Input label="Marca" required value={form.brand} onChange={(v) => setForm({ ...form, brand: v })} /><Input label="Modelo" required value={form.model} onChange={(v) => setForm({ ...form, model: v })} /><Input label="Ano" type="number" value={form.year} onChange={(v) => setForm({ ...form, year: v })} /><Input label="Cor" value={form.color} onChange={(v) => setForm({ ...form, color: v })} /><Input label="Quilometragem" type="number" value={form.mileage} onChange={(v) => setForm({ ...form, mileage: v })} /><Input label="Combustível" value={form.fuel} onChange={(v) => setForm({ ...form, fuel: v })} /><Input label="Chassi" value={form.chassis} onChange={(v) => setForm({ ...form, chassis: v })} /><div className="flex gap-3 sm:col-span-2 xl:grid-cols-3"><button disabled={!customers.length} className="rounded-xl bg-[#111820] px-5 py-3 font-bold text-white disabled:opacity-40">Salvar veículo</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-black/10 px-5 py-3 font-bold">Cancelar</button></div></form>}
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{vehicles.map((vehicle) => <article key={vehicle.id} className="rounded-2xl border border-black/8 bg-white p-5"><div className="flex items-start justify-between gap-3"><span className="rounded-lg bg-[#111820] px-3 py-2 font-black tracking-[.12em] text-white">{vehicle.plate}</span><div className="flex gap-2"><button onClick={() => onNewOrder(vehicle.id)} className="rounded-lg bg-[#ffe6de] p-2 text-[#d9411e]" title="Nova ordem"><Plus size={18} /></button><button disabled={deletingId === vehicle.id} onClick={() => void deleteVehicle(vehicle)} className="rounded-lg border border-red-200 bg-red-50 p-2 text-red-700 disabled:opacity-50" title="Excluir veículo"><Trash2 size={18} /></button></div></div><h2 className="mt-5 text-xl font-black">{vehicle.brand} {vehicle.model}</h2><p className="mt-1 text-sm text-[#6b737d]">{vehicle.year || "Ano não informado"} • {vehicle.color || "Cor não informada"}</p><div className="mt-5 border-t border-black/7 pt-4"><p className="text-xs font-bold uppercase tracking-wider text-[#8a9198]">Proprietário</p><p className="mt-1 font-bold">{vehicle.customer?.name}</p></div></article>)}{vehicles.length === 0 && <Empty text="Nenhum veículo cadastrado." />}</div>
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{vehicles.map((vehicle) => <article key={vehicle.id} className="rounded-2xl border border-black/8 bg-white p-5"><div className="flex items-start justify-between gap-3"><span className="rounded-lg bg-[#111820] px-3 py-2 font-black tracking-[.12em] text-white">{vehicle.plate}</span><div className="flex gap-2"><button onClick={() => onNewOrder(vehicle.id)} className="rounded-lg bg-[#ffe6de] p-2 text-[#d9411e]" title="Nova ordem"><Plus size={18} /></button><button disabled={Boolean(deletingId)} onClick={() => void deleteVehicle(vehicle)} className="rounded-lg border border-red-200 bg-red-50 p-2 text-red-700 disabled:opacity-50" title="Excluir veículo"><Trash2 size={18} /></button></div></div><h2 className="mt-5 text-xl font-black">{vehicle.brand} {vehicle.model}</h2><p className="mt-1 text-sm text-[#6b737d]">{vehicle.year || "Ano não informado"} • {vehicle.color || "Cor não informada"}</p><div className="mt-5 border-t border-black/7 pt-4"><p className="text-xs font-bold uppercase tracking-wider text-[#8a9198]">Proprietário</p><p className="mt-1 font-bold">{vehicle.customer?.name}</p></div></article>)}{vehicles.length === 0 && <Empty text="Nenhum veículo cadastrado." />}</div>
   </>;
 }
 
@@ -461,10 +402,12 @@ function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, 
   </>;
 }
 
-function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order: ServiceOrder; onClose: () => void; onChanged: () => void; onDeleted: () => void; onError: (e: string) => void }) {
+function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order: ServiceOrder; onClose: () => void; onChanged: () => void; onDeleted: (id: string) => Promise<void>; onError: (e: string) => void }) {
   const [newItem, setNewItem] = useState<ServiceItem>({ ...emptyItem });
   const [editedItems, setEditedItems] = useState<ServiceItem[]>((order.items || []).map((item) => ({ ...item })));
   const [deleting, setDeleting] = useState(false);
+  const deleteLock = useRef(false);
+  const [deleteError, setDeleteError] = useState("");
   const locked = order.status === "entregue";
   const shareReady = order.status === "concluida" || order.status === "entregue";
 
@@ -548,49 +491,18 @@ function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order
   }
 
   async function deleteOrder() {
-    if (locked || deleting) return;
-    const confirmed = window.confirm(`Excluir definitivamente a ${order.order_number}? Essa ação também apaga os itens desta ordem e não pode ser desfeita.`);
+    if (deleteLock.current) return;
+    const confirmed = window.confirm(`Excluir definitivamente a ${order.order_number} do veículo ${order.vehicle?.plate || ""}? Essa ação apaga os itens da ordem, inclusive se ela já foi entregue. O veículo e o cliente serão mantidos. Não pode ser desfeita.`);
     if (!confirmed) return;
-
-    setDeleting(true);
-
-    const { data: deletedRows, error } = await supabase
-      .from("service_orders")
-      .delete()
-      .eq("id", order.id)
-      .select("id");
-
-    if (error) {
-      setDeleting(false);
-      onError(`Não foi possível excluir esta ordem: ${error.message}`);
-      return;
+    deleteLock.current = true; setDeleting(true); setDeleteError(""); onError("");
+    try {
+      await deleteWorkshopRecord(supabase, "order", order.id);
+      await onDeleted(order.id);
+    } catch (cause) {
+      setDeleteError(deletionErrorMessage(cause));
+    } finally {
+      deleteLock.current = false; setDeleting(false);
     }
-
-    if (!deletedRows?.length) {
-      setDeleting(false);
-      onError("O banco não confirmou a exclusão da ordem. Nenhum registro foi apagado.");
-      return;
-    }
-
-    const { data: stillExists, error: verifyError } = await supabase
-      .from("service_orders")
-      .select("id")
-      .eq("id", order.id)
-      .maybeSingle();
-
-    setDeleting(false);
-
-    if (verifyError) {
-      onError(`A exclusão foi enviada, mas não foi possível confirmar no banco: ${verifyError.message}`);
-      return;
-    }
-
-    if (stillExists) {
-      onError("A ordem ainda existe no banco. A exclusão foi bloqueada.");
-      return;
-    }
-
-    onDeleted();
   }
 
   async function shareWhatsapp() {
@@ -621,7 +533,7 @@ function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
-  return <div className="fixed inset-0 z-[70] bg-black/55 p-3 backdrop-blur-sm sm:p-6"><div className="ml-auto h-full w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl"><div className="sticky top-0 z-10 flex items-start justify-between border-b border-black/8 bg-white p-5 sm:p-7"><div><p className="text-sm font-bold text-[#b91424]">{order.order_number}</p><h2 className="mt-1 text-2xl font-black">{order.vehicle?.plate} • {order.vehicle?.brand} {order.vehicle?.model}</h2></div><button onClick={onClose} aria-label="Fechar"><X /></button></div>
+  return <div className="fixed inset-0 z-[70] bg-black/55 p-3 backdrop-blur-sm sm:p-6"><div className="ml-auto h-full w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl"><div className="sticky top-0 z-10 flex items-start justify-between border-b border-black/8 bg-white p-5 sm:p-7"><div><p className="text-sm font-bold text-[#b91424]">{order.order_number}</p><h2 className="mt-1 text-2xl font-black">{order.vehicle?.plate} • {order.vehicle?.brand} {order.vehicle?.model}</h2></div><button disabled={deleting} onClick={onClose} aria-label="Fechar"><X /></button></div>
     <div className="p-5 sm:p-7"><div className="grid gap-4 rounded-2xl bg-[#f5f5f2] p-5 sm:grid-cols-3"><div><small>Cliente</small><p className="font-bold">{order.customer?.name}</p></div><div><small>Entrada</small><p className="font-bold">{dateBR(order.entry_date)}</p></div><div><small>Status</small><Status status={order.status} /></div></div>
       <div className="mt-6"><h3 className="font-black">Problema relatado</h3><p className="mt-2 leading-7 text-[#59626c]">{order.reported_problem}</p>{order.diagnosis && <><h3 className="mt-5 font-black">Diagnóstico</h3><p className="mt-2 leading-7 text-[#59626c]">{order.diagnosis}</p></>}</div>
 
@@ -644,13 +556,13 @@ function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order
 
       {!locked && <form onSubmit={addItem} className="mt-5 rounded-xl bg-[#fff4f0] p-4"><p className="mb-3 text-sm font-black">Adicionar novo item com preço</p><div className="grid gap-3 md:grid-cols-[130px_1fr_90px_140px_auto]"><select value={newItem.type} onChange={(e) => setNewItem({ ...newItem, type: e.target.value as ServiceItem["type"] })} className="rounded-lg border border-black/10 bg-white px-3"><option value="servico">Serviço</option><option value="mao_de_obra">Mão de obra</option><option value="peca">Peça</option></select><input required placeholder="Descrição" value={newItem.description} onChange={(e) => setNewItem({ ...newItem, description: e.target.value })} className="min-h-11 rounded-lg border border-black/10 px-3" /><input aria-label="Quantidade" title="Quantidade" type="number" min=".01" step=".01" value={newItem.quantity} onChange={(e) => setNewItem({ ...newItem, quantity: Number(e.target.value) })} className="rounded-lg border border-black/10 px-3" /><input aria-label="Preço unitário em reais" title="Preço unitário em reais" placeholder="R$" type="number" min="0" step=".01" value={newItem.unit_price} onChange={(e) => setNewItem({ ...newItem, unit_price: Number(e.target.value) })} className="rounded-lg border border-black/10 px-3" /><button className="rounded-lg bg-[#b91424] px-4 font-black text-white">Adicionar</button></div><p className="mt-2 text-right text-sm font-bold">Subtotal: {money(Number(newItem.quantity) * Number(newItem.unit_price))}</p></form>}
 
-      {locked && <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-800">Esta ordem foi entregue e está bloqueada. Crie uma nova OS para registrar outro atendimento.</p>}
+      {locked && <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-800">Esta ordem foi entregue e sua edição está bloqueada. Crie uma nova OS para registrar outro atendimento.</p>}
       <div className="mt-7 flex items-end justify-between border-t border-black/8 pt-6"><div className="flex flex-wrap gap-2">{order.status === "concluida" && <button onClick={() => updateStatus("em_andamento")} className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800">Reabrir ordem</button>}{!locked && <select value={order.status} onChange={(e) => updateStatus(e.target.value as OrderStatus)} className="rounded-xl border border-black/10 px-3 py-2 text-sm font-bold">{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>}</div><div className="text-right"><p className="text-sm text-[#6b737d]">Total da ordem</p><p className="text-3xl font-black">{money(order.total)}</p></div></div>
 
       <div className="mt-7 grid gap-3 sm:grid-cols-2"><button onClick={() => downloadOrderPdf(order)} className="flex items-center justify-center gap-2 rounded-xl bg-[#111820] px-5 py-3 font-black text-white"><FileDown size={18} /> Baixar PDF</button><button disabled={!shareReady} onClick={() => void shareWhatsapp()} className="flex items-center justify-center gap-2 rounded-xl border border-black/10 px-5 py-3 font-black disabled:cursor-not-allowed disabled:bg-black/[.03] disabled:text-black/35"><Share2 size={18} /> {shareReady ? "Compartilhar PDF no WhatsApp" : "Conclua a OS para compartilhar"}</button></div>
       {!shareReady && <p className="mt-2 text-center text-xs font-semibold text-[#7a828a]">O compartilhamento é liberado quando a ordem estiver como Concluída ou Entregue.</p>}
 
-      <div className="mt-8 border-t border-red-100 pt-6"><button disabled={locked || deleting} onClick={() => void deleteOrder()} className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-black text-red-700 disabled:cursor-not-allowed disabled:opacity-40"><Trash2 size={17} /> {deleting ? "Excluindo..." : "Excluir ordem de serviço"}</button>{locked && <p className="mt-2 text-xs font-semibold text-[#8a9198]">Ordens já entregues ficam bloqueadas para preservar o histórico.</p>}</div>
+      <div className="mt-8 border-t border-red-100 pt-6">{deleteError && <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{deleteError}</p>}<button disabled={deleting} onClick={() => void deleteOrder()} className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-black text-red-700 disabled:cursor-not-allowed disabled:opacity-40"><Trash2 size={17} /> {deleting ? "Excluindo..." : "Excluir ordem de serviço"}</button><p className="mt-2 text-xs font-semibold text-[#8a9198]">Excluir a OS também remove seus itens. O veículo e o cliente permanecem cadastrados.</p></div>
     </div></div></div>;
 }
 

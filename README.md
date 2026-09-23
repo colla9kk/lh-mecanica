@@ -37,6 +37,24 @@ Edite `lib/config.ts` e troque nome, telefone, WhatsApp, endereço, horário e e
 5. Em **Authentication > Users**, crie manualmente o usuário da oficina.
 6. Em **Project Settings > API**, copie a URL e a chave pública `anon`.
 
+### Atualizar um banco já existente (correção das exclusões)
+
+No **SQL Editor** do Supabase, execute o conteúdo de
+`supabase/migrations/20260923_fix_deletions.sql` e aguarde **Success**.
+Depois publique a versão atualizada do site. Publicar o site sozinho não aplica
+a atualização do banco. Esse SQL não apaga dados e pode ser executado novamente.
+
+- **OS:** pode ser excluída após confirmação, inclusive quando entregue.
+  Os itens da OS também são apagados; cliente e veículo permanecem.
+- **Veículo:** pode ser excluído quando não possui OS vinculadas.
+  Não é necessário excluir o cliente.
+- **Cliente:** exclui o cliente e seus veículos sem histórico numa única
+  transação. Se houver uma OS ligada ao cliente ou aos veículos dele,
+  exclua as ordens primeiro. Uma falha desfaz toda a operação.
+- Ordens entregues continuam bloqueadas para edição.
+- A mensagem de sucesso só aparece quando o banco confirma a exclusão.
+  Os erros de exclusão de OS aparecem dentro da própria janela.
+
 ## 4. Variáveis de ambiente
 
 Copie `.env.example` para `.env.local`:
