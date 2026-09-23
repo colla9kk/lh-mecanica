@@ -303,7 +303,7 @@ function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, 
     return Boolean(
       order.order_number?.toLowerCase().includes(rawSearch) ||
       order.customer?.name?.toLowerCase().includes(rawSearch) ||
-      order.vehicle?.plate?.toLowerCase().includes(plateSearch) ||
+      (plateSearch && order.vehicle?.plate?.toLowerCase().includes(plateSearch)) ||
       order.vehicle?.brand?.toLowerCase().includes(rawSearch) ||
       order.vehicle?.model?.toLowerCase().includes(rawSearch)
     );
