@@ -214,33 +214,59 @@ function CustomersPanel({ customers, onSaved, onDeleted, onError }: { customers:
 
   async function deleteCustomer(customer: Customer) {
     if (deletingId) return;
-    const confirmed = window.confirm(`Excluir o cliente "${customer.name}"? Essa ação não pode ser desfeita.`);
+    const confirmed = window.confirm(`Excluir o cliente "${customer.name}" e os veículos dele que não possuem histórico de OS? Essa ação não pode ser desfeita.`);
     if (!confirmed) return;
 
     setDeletingId(customer.id);
 
-    const { count: vehicleCount, error: countError } = await supabase
+    const { data: customerVehicles, error: vehiclesError } = await supabase
       .from("vehicles")
-      .select("id", { count: "exact", head: true })
+      .select("id, plate")
       .eq("customer_id", customer.id);
 
-    if (countError) {
+    if (vehiclesError) {
       setDeletingId("");
-      onError("Não foi possível verificar os vínculos deste cliente.");
+      onError("Não foi possível verificar os veículos deste cliente.");
       return;
     }
 
-    if ((vehicleCount || 0) > 0) {
-      setDeletingId("");
-      onError(`Este cliente possui ${vehicleCount} veículo(s) vinculado(s). Exclua os veículos primeiro.`);
-      return;
+    const vehicleIds = (customerVehicles || []).map((vehicle) => vehicle.id);
+
+    if (vehicleIds.length) {
+      const { count: orderCount, error: ordersError } = await supabase
+        .from("service_orders")
+        .select("id", { count: "exact", head: true })
+        .in("vehicle_id", vehicleIds);
+
+      if (ordersError) {
+        setDeletingId("");
+        onError("Não foi possível verificar o histórico de ordens deste cliente.");
+        return;
+      }
+
+      if ((orderCount || 0) > 0) {
+        setDeletingId("");
+        onError(`Este cliente possui ${orderCount} ordem(ns) de serviço no histórico. Exclua essas ordens primeiro.`);
+        return;
+      }
+
+      const { error: deleteVehiclesError } = await supabase
+        .from("vehicles")
+        .delete()
+        .eq("customer_id", customer.id);
+
+      if (deleteVehiclesError) {
+        setDeletingId("");
+        onError("Não foi possível excluir os veículos vinculados a este cliente.");
+        return;
+      }
     }
 
     const { error } = await supabase.from("customers").delete().eq("id", customer.id);
     setDeletingId("");
 
     if (error) {
-      onError("Não foi possível excluir o cliente porque ele ainda possui registros vinculados.");
+      onError("Não foi possível excluir o cliente.");
       return;
     }
 
@@ -299,7 +325,7 @@ function VehiclesPanel({ vehicles, customers, onSaved, onDeleted, onError, onNew
     setDeletingId("");
 
     if (error) {
-      onError("Não foi possível excluir o veículo porque ele ainda possui registros vinculados.");
+      onError("Não foi possível excluir o veículo. Ele pode estar vinculado a uma ordem de serviço.");
       return;
     }
 
