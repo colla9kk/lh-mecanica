@@ -4,11 +4,11 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   CarFront, ChevronRight, CircleDollarSign, ClipboardList, Download, FileDown,
-  LayoutDashboard, LogOut, Menu, Plus, RefreshCw, Search, UserRound, Users, Wrench, X,
+  LayoutDashboard, LogOut, Menu, Plus, RefreshCw, Search, Share2, UserRound, Users, Wrench, X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { dateBR, money, normalizePlate, today } from "@/lib/format";
-import { downloadOrderPdf } from "@/lib/pdf";
+import { createOrderPdfFile, downloadOrderPdf } from "@/lib/pdf";
 import { Customer, OrderStatus, ServiceItem, ServiceOrder, Vehicle, statusLabels } from "@/lib/types";
 
 type Tab = "inicio" | "placa" | "clientes" | "veiculos" | "ordens" | "backup";
@@ -216,56 +216,194 @@ function VehiclesPanel({ vehicles, customers, onSaved, onError, onNewOrder }: { 
 }
 
 function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, onError, onSelectOrder }: { orders: ServiceOrder[]; vehicles: Vehicle[]; presetVehicleId: string; clearPreset: () => void; onSaved: () => void; onError: (e: string) => void; onSelectOrder: (o: ServiceOrder) => void }) {
+  const initialVehicle = vehicles.find((vehicle) => vehicle.id === presetVehicleId);
   const [showForm, setShowForm] = useState(Boolean(presetVehicleId));
-  const [form, setForm] = useState({ vehicle_id: presetVehicleId, entry_date: today(), expected_delivery_date: "", mileage: "", reported_problem: "", diagnosis: "", notes: "", discount: "0" });
+  const [form, setForm] = useState({ vehicle_id: presetVehicleId, plate: initialVehicle?.plate || "", entry_date: today(), expected_delivery_date: "", mileage: "", reported_problem: "", diagnosis: "", notes: "", discount: "0" });
   const [items, setItems] = useState<ServiceItem[]>([{ ...emptyItem }]);
-  useEffect(() => { if (presetVehicleId) { setShowForm(true); setForm((f) => ({ ...f, vehicle_id: presetVehicleId })); clearPreset(); } }, [presetVehicleId, clearPreset]);
+  const [orderSearch, setOrderSearch] = useState("");
+
+  useEffect(() => {
+    if (!presetVehicleId) return;
+    const vehicle = vehicles.find((item) => item.id === presetVehicleId);
+    setShowForm(true);
+    setForm((current) => ({ ...current, vehicle_id: presetVehicleId, plate: vehicle?.plate || current.plate }));
+    clearPreset();
+  }, [presetVehicleId, clearPreset, vehicles]);
+
+  const matchedVehicle = vehicles.find((vehicle) => vehicle.plate === normalizePlate(form.plate));
   const totals = useMemo(() => calculateTotals(items, Number(form.discount || 0)), [items, form.discount]);
-  function updateItem(index: number, field: keyof ServiceItem, value: string) { setItems((current) => current.map((item, i) => { if (i !== index) return item; const next = { ...item, [field]: field === "quantity" || field === "unit_price" ? Number(value) : value }; return { ...next, subtotal: Number(next.quantity) * Number(next.unit_price) }; })); }
-  async function submit(e: FormEvent) {
-    e.preventDefault(); const vehicle = vehicles.find((v) => v.id === form.vehicle_id); if (!vehicle) return;
-    const validItems = items.filter((i) => i.description.trim());
-    const { data, error } = await supabase.from("service_orders").insert({ customer_id: vehicle.customer_id, vehicle_id: vehicle.id, entry_date: form.entry_date, expected_delivery_date: form.expected_delivery_date || null, mileage: form.mileage ? Number(form.mileage) : null, reported_problem: form.reported_problem, diagnosis: form.diagnosis || null, notes: form.notes || null, status: "aberta", ...totals }).select().single();
-    if (error || !data) { onError("Não foi possível criar a ordem."); return; }
-    if (validItems.length) {
-      const { error: itemError } = await supabase.from("service_order_items").insert(validItems.map((item) => ({ service_order_id: data.id, type: item.type, description: item.description, quantity: item.quantity, unit_price: item.unit_price, subtotal: item.subtotal })));
-      if (itemError) { onError("A ordem foi criada, mas os itens não foram salvos."); return; }
-    }
-    if (form.mileage) await supabase.from("vehicles").update({ mileage: Number(form.mileage) }).eq("id", vehicle.id);
-    setShowForm(false); setItems([{ ...emptyItem }]); setForm({ vehicle_id: "", entry_date: today(), expected_delivery_date: "", mileage: "", reported_problem: "", diagnosis: "", notes: "", discount: "0" }); onSaved();
+
+  function updateItem(index: number, field: keyof ServiceItem, value: string) {
+    setItems((current) => current.map((item, i) => {
+      if (i !== index) return item;
+      const next = { ...item, [field]: field === "quantity" || field === "unit_price" ? Number(value) : value };
+      return { ...next, subtotal: Number(next.quantity) * Number(next.unit_price) };
+    }));
   }
-  return <><PageTitle eyebrow="Atendimentos" title="Ordens de serviço" copy="Crie uma nova ordem a cada visita e preserve o histórico do veículo." action={<button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 rounded-xl bg-[#b91424] px-5 py-3 text-sm font-black text-white"><Plus size={17} /> Nova OS</button>} />
-    {showForm && <form onSubmit={submit} className="mb-8 rounded-2xl border border-black/8 bg-white p-5 sm:p-7"><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Select label="Veículo" required value={form.vehicle_id} onChange={(v) => setForm({ ...form, vehicle_id: v })} options={vehicles.map((v) => [v.id, `${v.plate} • ${v.brand} ${v.model}`])} /><Input label="Data de entrada" type="date" required value={form.entry_date} onChange={(v) => setForm({ ...form, entry_date: v })} /><Input label="Previsão de entrega" type="date" value={form.expected_delivery_date} onChange={(v) => setForm({ ...form, expected_delivery_date: v })} /><Input label="Quilometragem" type="number" value={form.mileage} onChange={(v) => setForm({ ...form, mileage: v })} /></div>
+
+  function updatePlate(value: string) {
+    const plate = normalizePlate(value);
+    const vehicle = vehicles.find((item) => item.plate === plate);
+    setForm((current) => ({ ...current, plate, vehicle_id: vehicle?.id || "" }));
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const vehicle = vehicles.find((item) => item.plate === normalizePlate(form.plate));
+    if (!vehicle) {
+      onError("Placa não encontrada. Cadastre o veículo antes de criar a ordem.");
+      return;
+    }
+
+    const validItems = items.filter((item) => item.description.trim());
+    const { data, error } = await supabase.from("service_orders").insert({
+      customer_id: vehicle.customer_id,
+      vehicle_id: vehicle.id,
+      entry_date: form.entry_date,
+      expected_delivery_date: form.expected_delivery_date || null,
+      mileage: form.mileage ? Number(form.mileage) : null,
+      reported_problem: form.reported_problem,
+      diagnosis: form.diagnosis || null,
+      notes: form.notes || null,
+      status: "aberta",
+      ...totals,
+    }).select().single();
+
+    if (error || !data) {
+      onError("Não foi possível criar a ordem.");
+      return;
+    }
+
+    if (validItems.length) {
+      const { error: itemError } = await supabase.from("service_order_items").insert(validItems.map((item) => ({
+        service_order_id: data.id,
+        type: item.type,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        subtotal: item.subtotal,
+      })));
+      if (itemError) {
+        onError("A ordem foi criada, mas os itens não foram salvos.");
+        return;
+      }
+    }
+
+    if (form.mileage) await supabase.from("vehicles").update({ mileage: Number(form.mileage) }).eq("id", vehicle.id);
+    setShowForm(false);
+    setItems([{ ...emptyItem }]);
+    setForm({ vehicle_id: "", plate: "", entry_date: today(), expected_delivery_date: "", mileage: "", reported_problem: "", diagnosis: "", notes: "", discount: "0" });
+    onSaved();
+  }
+
+  const rawSearch = orderSearch.trim().toLowerCase();
+  const plateSearch = normalizePlate(orderSearch).toLowerCase();
+  const filteredOrders = orders.filter((order) => {
+    if (!rawSearch) return true;
+    return Boolean(
+      order.order_number?.toLowerCase().includes(rawSearch) ||
+      order.customer?.name?.toLowerCase().includes(rawSearch) ||
+      (plateSearch && order.vehicle?.plate?.toLowerCase().includes(plateSearch)) ||
+      order.vehicle?.brand?.toLowerCase().includes(rawSearch) ||
+      order.vehicle?.model?.toLowerCase().includes(rawSearch)
+    );
+  });
+
+  return <><PageTitle eyebrow="Atendimentos" title="Ordens de serviço" copy="Digite a placa para abrir uma nova OS e pesquise depois por placa, número da ordem ou cliente." action={<button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 rounded-xl bg-[#b91424] px-5 py-3 text-sm font-black text-white"><Plus size={17} /> Nova OS</button>} />
+    {showForm && <form onSubmit={submit} className="mb-8 rounded-2xl border border-black/8 bg-white p-5 sm:p-7">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <label className="grid gap-2 text-sm font-bold">Placa do veículo
+          <input required autoComplete="off" list="order-vehicle-plates" value={form.plate} onChange={(e) => updatePlate(e.target.value)} placeholder="ABC1D23" className="min-h-11 rounded-xl border border-black/10 px-3 font-black uppercase tracking-[.08em]" />
+          <datalist id="order-vehicle-plates">{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.plate}>{vehicle.brand} {vehicle.model}</option>)}</datalist>
+          {matchedVehicle ? <span className="text-xs font-semibold text-emerald-700">{matchedVehicle.brand} {matchedVehicle.model} • {matchedVehicle.customer?.name || "proprietário cadastrado"}</span> : form.plate.length >= 6 ? <span className="text-xs font-semibold text-red-600">Placa não cadastrada. Cadastre o veículo primeiro.</span> : <span className="text-xs font-medium text-[#7a828a]">Comece a digitar e selecione a placa cadastrada.</span>}
+        </label>
+        <Input label="Data de entrada" type="date" required value={form.entry_date} onChange={(v) => setForm({ ...form, entry_date: v })} />
+        <Input label="Previsão de entrega" type="date" value={form.expected_delivery_date} onChange={(v) => setForm({ ...form, expected_delivery_date: v })} />
+        <Input label="Quilometragem" type="number" value={form.mileage} onChange={(v) => setForm({ ...form, mileage: v })} />
+      </div>
       <label className="mt-4 grid gap-2 text-sm font-bold">Problema relatado<textarea required rows={3} value={form.reported_problem} onChange={(e) => setForm({ ...form, reported_problem: e.target.value })} className="rounded-xl border border-black/10 p-3" /></label>
       <div className="mt-7 flex items-center justify-between"><h2 className="font-black">Serviços e peças</h2><button type="button" onClick={() => setItems([...items, { ...emptyItem }])} className="text-sm font-black text-[#b91424]">+ Adicionar item</button></div>
       <div className="mt-3 space-y-3">{items.map((item, index) => <div key={index} className="grid gap-3 rounded-xl bg-[#f5f5f2] p-3 md:grid-cols-[150px_1fr_90px_140px_40px]"><select value={item.type} onChange={(e) => updateItem(index, "type", e.target.value)} className="rounded-lg border border-black/10 bg-white px-3"><option value="servico">Serviço</option><option value="mao_de_obra">Mão de obra</option><option value="peca">Peça</option></select><input placeholder="Descrição" value={item.description} onChange={(e) => updateItem(index, "description", e.target.value)} className="min-h-11 rounded-lg border border-black/10 px-3" /><input aria-label="Quantidade" type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateItem(index, "quantity", e.target.value)} className="rounded-lg border border-black/10 px-3" /><input aria-label="Valor unitário" type="number" min="0" step="0.01" value={item.unit_price} onChange={(e) => updateItem(index, "unit_price", e.target.value)} className="rounded-lg border border-black/10 px-3" /><button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))} className="grid place-items-center text-red-500"><X size={18} /></button></div>)}</div>
       <div className="mt-6 grid gap-4 sm:grid-cols-2"><label className="grid gap-2 text-sm font-bold">Diagnóstico<textarea rows={3} value={form.diagnosis} onChange={(e) => setForm({ ...form, diagnosis: e.target.value })} className="rounded-xl border border-black/10 p-3" /></label><label className="grid gap-2 text-sm font-bold">Observações<textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="rounded-xl border border-black/10 p-3" /></label></div>
       <div className="mt-6 flex flex-col items-end gap-2 border-t border-black/8 pt-5"><Input label="Desconto" type="number" value={form.discount} onChange={(v) => setForm({ ...form, discount: v })} /><p className="text-sm text-[#6b737d]">Peças: {money(totals.parts_total)} • Serviços: {money(totals.labor_total)}</p><p className="text-2xl font-black">Total: {money(totals.total)}</p></div>
-      <div className="mt-6 flex gap-3"><button disabled={!vehicles.length} className="rounded-xl bg-[#111820] px-5 py-3 font-black text-white disabled:opacity-40">Criar ordem</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-black/10 px-5 py-3 font-bold">Cancelar</button></div>
+      <div className="mt-6 flex gap-3"><button disabled={!matchedVehicle} className="rounded-xl bg-[#111820] px-5 py-3 font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Criar ordem</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-black/10 px-5 py-3 font-bold">Cancelar</button></div>
     </form>}
-    <div className="overflow-hidden rounded-2xl border border-black/8 bg-white"><div className="overflow-x-auto"><table className="w-full min-w-[850px] text-left"><thead className="bg-[#111820] text-sm text-white"><tr><th className="p-4">OS</th><th className="p-4">Data</th><th className="p-4">Veículo</th><th className="p-4">Cliente</th><th className="p-4">Status</th><th className="p-4">Total</th></tr></thead><tbody className="divide-y divide-black/7">{orders.map((o) => <tr key={o.id} onClick={() => onSelectOrder(o)} className="cursor-pointer hover:bg-black/[.02]"><td className="p-4 font-black">{o.order_number}</td><td className="p-4">{dateBR(o.entry_date)}</td><td className="p-4"><b>{o.vehicle?.plate}</b> • {o.vehicle?.model}</td><td className="p-4">{o.customer?.name}</td><td className="p-4"><Status status={o.status} /></td><td className="p-4 font-bold">{money(o.total)}</td></tr>)}</tbody></table></div>{orders.length === 0 && <Empty text="Nenhuma ordem cadastrada." />}</div>
+
+    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="relative w-full max-w-lg"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#7a828a]" size={18} /><input value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} placeholder="Buscar por placa, OS ou cliente" className="min-h-12 w-full rounded-xl border border-black/10 bg-white pl-10 pr-4" /></div>
+      <span className="text-sm font-semibold text-[#6b737d]">{filteredOrders.length} {filteredOrders.length === 1 ? "ordem encontrada" : "ordens encontradas"}</span>
+    </div>
+
+    <div className="overflow-hidden rounded-2xl border border-black/8 bg-white"><div className="overflow-x-auto"><table className="w-full min-w-[850px] text-left"><thead className="bg-[#111820] text-sm text-white"><tr><th className="p-4">OS</th><th className="p-4">Data</th><th className="p-4">Veículo</th><th className="p-4">Cliente</th><th className="p-4">Status</th><th className="p-4">Total</th></tr></thead><tbody className="divide-y divide-black/7">{filteredOrders.map((o) => <tr key={o.id} onClick={() => onSelectOrder(o)} className="cursor-pointer hover:bg-black/[.02]"><td className="p-4 font-black">{o.order_number}</td><td className="p-4">{dateBR(o.entry_date)}</td><td className="p-4"><b>{o.vehicle?.plate}</b> • {o.vehicle?.model}</td><td className="p-4">{o.customer?.name}</td><td className="p-4"><Status status={o.status} /></td><td className="p-4 font-bold">{money(o.total)}</td></tr>)}</tbody></table></div>{filteredOrders.length === 0 && <Empty text={orderSearch ? "Nenhuma ordem encontrada para essa busca." : "Nenhuma ordem cadastrada."} />}</div>
   </>;
 }
 
 function OrderDetails({ order, onClose, onChanged, onError }: { order: ServiceOrder; onClose: () => void; onChanged: () => void; onError: (e: string) => void }) {
   const [newItem, setNewItem] = useState<ServiceItem>({ ...emptyItem });
   const locked = order.status === "entregue";
+  const shareReady = order.status === "concluida" || order.status === "entregue";
+
   async function updateStatus(status: OrderStatus) {
     if (order.status === "entregue") return;
     const completed_at = status === "concluida" || status === "entregue" ? new Date().toISOString() : null;
     const { error } = await supabase.from("service_orders").update({ status, completed_at }).eq("id", order.id);
-    if (error) { onError("Não foi possível alterar o status."); return; } onChanged();
+    if (error) {
+      onError("Não foi possível alterar o status.");
+      return;
+    }
+    onChanged();
   }
+
   async function addItem(e: FormEvent) {
-    e.preventDefault(); if (locked || !newItem.description.trim()) return;
+    e.preventDefault();
+    if (locked || !newItem.description.trim()) return;
     const subtotal = Number(newItem.quantity) * Number(newItem.unit_price);
     const allItems = [...(order.items || []), { ...newItem, subtotal }];
     const totals = calculateTotals(allItems, Number(order.discount));
-    const { error } = await supabase.from("service_order_items").insert({ service_order_id: order.id, type: newItem.type, description: newItem.description, quantity: newItem.quantity, unit_price: newItem.unit_price, subtotal });
-    if (error) { onError("Não foi possível adicionar o item."); return; }
-    await supabase.from("service_orders").update(totals).eq("id", order.id); onChanged();
+    const { error } = await supabase.from("service_order_items").insert({
+      service_order_id: order.id,
+      type: newItem.type,
+      description: newItem.description,
+      quantity: newItem.quantity,
+      unit_price: newItem.unit_price,
+      subtotal,
+    });
+    if (error) {
+      onError("Não foi possível adicionar o item.");
+      return;
+    }
+    await supabase.from("service_orders").update(totals).eq("id", order.id);
+    onChanged();
   }
-  const whatsapp = () => { const phone = order.customer?.whatsapp || order.customer?.phone || ""; const message = `Olá! A ${order.order_number} do veículo ${order.vehicle?.plate} está como “${statusLabels[order.status]}”. Valor: ${money(order.total)}.`; window.open(`https://wa.me/55${phone.replace(/\D/g, "").replace(/^55/, "")}?text=${encodeURIComponent(message)}`, "_blank"); };
+
+  async function shareWhatsapp() {
+    if (!shareReady) return;
+    const message = `Olá! Segue a ${order.order_number} do veículo ${order.vehicle?.plate || ""}. Status: ${statusLabels[order.status]}. Valor: ${money(order.total)}.`;
+    const file = createOrderPdfFile(order);
+
+    try {
+      if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+        await navigator.share({
+          title: `${order.order_number} • ${order.vehicle?.plate || "veículo"}`,
+          text: message,
+          files: [file],
+        });
+        return;
+      }
+    } catch (shareError) {
+      if (shareError instanceof DOMException && shareError.name === "AbortError") return;
+    }
+
+    downloadOrderPdf(order);
+    const digits = (order.customer?.whatsapp || order.customer?.phone || "").replace(/\D/g, "");
+    const phone = digits ? (digits.startsWith("55") ? digits : `55${digits}`) : "";
+    const fallbackMessage = `${message} O PDF da ordem foi baixado neste aparelho; anexe o arquivo nesta conversa.`;
+    const url = phone
+      ? `https://wa.me/${phone}?text=${encodeURIComponent(fallbackMessage)}`
+      : `https://wa.me/?text=${encodeURIComponent(fallbackMessage)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
   return <div className="fixed inset-0 z-[70] bg-black/55 p-3 backdrop-blur-sm sm:p-6"><div className="ml-auto h-full w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl"><div className="sticky top-0 z-10 flex items-start justify-between border-b border-black/8 bg-white p-5 sm:p-7"><div><p className="text-sm font-bold text-[#b91424]">{order.order_number}</p><h2 className="mt-1 text-2xl font-black">{order.vehicle?.plate} • {order.vehicle?.brand} {order.vehicle?.model}</h2></div><button onClick={onClose} aria-label="Fechar"><X /></button></div>
     <div className="p-5 sm:p-7"><div className="grid gap-4 rounded-2xl bg-[#f5f5f2] p-5 sm:grid-cols-3"><div><small>Cliente</small><p className="font-bold">{order.customer?.name}</p></div><div><small>Entrada</small><p className="font-bold">{dateBR(order.entry_date)}</p></div><div><small>Status</small><Status status={order.status} /></div></div>
       <div className="mt-6"><h3 className="font-black">Problema relatado</h3><p className="mt-2 leading-7 text-[#59626c]">{order.reported_problem}</p>{order.diagnosis && <><h3 className="mt-5 font-black">Diagnóstico</h3><p className="mt-2 leading-7 text-[#59626c]">{order.diagnosis}</p></>}</div>
@@ -273,7 +411,8 @@ function OrderDetails({ order, onClose, onChanged, onError }: { order: ServiceOr
       {!locked && <form onSubmit={addItem} className="mt-5 grid gap-3 rounded-xl bg-[#fff4f0] p-4 md:grid-cols-[130px_1fr_90px_130px_auto]"><select value={newItem.type} onChange={(e) => setNewItem({ ...newItem, type: e.target.value as ServiceItem["type"] })} className="rounded-lg border border-black/10 bg-white px-3"><option value="servico">Serviço</option><option value="mao_de_obra">Mão de obra</option><option value="peca">Peça</option></select><input required placeholder="Novo item" value={newItem.description} onChange={(e) => setNewItem({ ...newItem, description: e.target.value })} className="min-h-11 rounded-lg border border-black/10 px-3" /><input type="number" min=".01" step=".01" value={newItem.quantity} onChange={(e) => setNewItem({ ...newItem, quantity: Number(e.target.value) })} className="rounded-lg border border-black/10 px-3" /><input type="number" min="0" step=".01" value={newItem.unit_price} onChange={(e) => setNewItem({ ...newItem, unit_price: Number(e.target.value) })} className="rounded-lg border border-black/10 px-3" /><button className="rounded-lg bg-[#b91424] px-4 font-black text-white">Adicionar</button></form>}
       {locked && <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-800">Esta ordem foi entregue e está bloqueada. Crie uma nova OS para registrar outro atendimento.</p>}
       <div className="mt-7 flex items-end justify-between border-t border-black/8 pt-6"><div className="flex flex-wrap gap-2">{order.status === "concluida" && <button onClick={() => updateStatus("em_andamento")} className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800">Reabrir ordem</button>}{!locked && <select value={order.status} onChange={(e) => updateStatus(e.target.value as OrderStatus)} className="rounded-xl border border-black/10 px-3 py-2 text-sm font-bold">{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>}</div><div className="text-right"><p className="text-sm text-[#6b737d]">Total da ordem</p><p className="text-3xl font-black">{money(order.total)}</p></div></div>
-      <div className="mt-7 grid gap-3 sm:grid-cols-2"><button onClick={() => downloadOrderPdf(order)} className="flex items-center justify-center gap-2 rounded-xl bg-[#111820] px-5 py-3 font-black text-white"><FileDown size={18} /> Baixar PDF</button><button onClick={whatsapp} className="rounded-xl border border-black/10 px-5 py-3 font-black">Enviar resumo pelo WhatsApp</button></div>
+      <div className="mt-7 grid gap-3 sm:grid-cols-2"><button onClick={() => downloadOrderPdf(order)} className="flex items-center justify-center gap-2 rounded-xl bg-[#111820] px-5 py-3 font-black text-white"><FileDown size={18} /> Baixar PDF</button><button disabled={!shareReady} onClick={() => void shareWhatsapp()} className="flex items-center justify-center gap-2 rounded-xl border border-black/10 px-5 py-3 font-black disabled:cursor-not-allowed disabled:bg-black/[.03] disabled:text-black/35"><Share2 size={18} /> {shareReady ? "Compartilhar PDF no WhatsApp" : "Conclua a OS para compartilhar"}</button></div>
+      {!shareReady && <p className="mt-2 text-center text-xs font-semibold text-[#7a828a]">O compartilhamento é liberado quando a ordem estiver como Concluída ou Entregue.</p>}
     </div></div></div>;
 }
 
