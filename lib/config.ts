@@ -3,7 +3,7 @@ export const business = {
   shortName: "LH Mecânica",
   tagline: "Socorro 24 horas e manutenção automotiva",
   phone: "(13) 99640-4115",
-  whatsapp: "55139996404115",
+  whatsapp: "5513996404115",
   address: "Guarujá - SP",
   hours: "Consulte os horários de atendimento pelo WhatsApp.",
   email: "Jesushenry255@gmail.com",
