@@ -145,8 +145,8 @@ export default function AdminPage() {
           {error && <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
           {tab === "inicio" && <Dashboard customers={customers} vehicles={vehicles} orders={orders} loading={loading} onPlate={() => setTab("placa")} onNewOrder={() => setTab("ordens")} onSelectOrder={setSelectedOrder} />}
           {tab === "placa" && <PlateLookup query={plateSearch} onQuery={setPlateSearch} vehicle={foundVehicle} orders={foundOrders} onNewOrder={newOrderFor} onSelectOrder={setSelectedOrder} />}
-          {tab === "clientes" && <CustomersPanel customers={customers} onSaved={async () => { notify("Cliente cadastrado."); await loadData(); }} onError={setError} />}
-          {tab === "veiculos" && <VehiclesPanel vehicles={vehicles} customers={customers} onSaved={async () => { notify("Veículo cadastrado."); await loadData(); }} onError={setError} onNewOrder={newOrderFor} />}
+          {tab === "clientes" && <CustomersPanel customers={customers} onSaved={async () => { notify("Cliente cadastrado."); await loadData(); }} onDeleted={async () => { notify("Cliente excluído."); await loadData(); }} onError={setError} />}
+          {tab === "veiculos" && <VehiclesPanel vehicles={vehicles} customers={customers} onSaved={async () => { notify("Veículo cadastrado."); await loadData(); }} onDeleted={async () => { notify("Veículo excluído."); await loadData(); }} onError={setError} onNewOrder={newOrderFor} />}
           {tab === "ordens" && <OrdersPanel orders={orders} vehicles={vehicles} presetVehicleId={presetVehicleId} clearPreset={() => setPresetVehicleId("")} onSaved={async () => { notify("Ordem de serviço criada."); await loadData(); }} onError={setError} onSelectOrder={setSelectedOrder} />}
           {tab === "backup" && <BackupPanel customers={customers} vehicles={vehicles} orders={orders} />}
         </section>
@@ -195,23 +195,120 @@ function PlateLookup({ query, onQuery, vehicle, orders, onNewOrder, onSelectOrde
   </>;
 }
 
-function CustomersPanel({ customers, onSaved, onError }: { customers: Customer[]; onSaved: () => void; onError: (e: string) => void }) {
+function CustomersPanel({ customers, onSaved, onDeleted, onError }: { customers: Customer[]; onSaved: () => void; onDeleted: () => void; onError: (e: string) => void }) {
   const [showForm, setShowForm] = useState(false);
+  const [deletingId, setDeletingId] = useState("");
   const [form, setForm] = useState({ name: "", document: "", phone: "", whatsapp: "", email: "", address: "", notes: "" });
-  async function submit(e: FormEvent) { e.preventDefault(); const { error } = await supabase.from("customers").insert(form); if (error) { onError("Não foi possível cadastrar o cliente."); return; } setForm({ name: "", document: "", phone: "", whatsapp: "", email: "", address: "", notes: "" }); setShowForm(false); onSaved(); }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const { error } = await supabase.from("customers").insert(form);
+    if (error) {
+      onError("Não foi possível cadastrar o cliente.");
+      return;
+    }
+    setForm({ name: "", document: "", phone: "", whatsapp: "", email: "", address: "", notes: "" });
+    setShowForm(false);
+    onSaved();
+  }
+
+  async function deleteCustomer(customer: Customer) {
+    if (deletingId) return;
+    const confirmed = window.confirm(`Excluir o cliente "${customer.name}"? Essa ação não pode ser desfeita.`);
+    if (!confirmed) return;
+
+    setDeletingId(customer.id);
+
+    const { count: vehicleCount, error: countError } = await supabase
+      .from("vehicles")
+      .select("id", { count: "exact", head: true })
+      .eq("customer_id", customer.id);
+
+    if (countError) {
+      setDeletingId("");
+      onError("Não foi possível verificar os vínculos deste cliente.");
+      return;
+    }
+
+    if ((vehicleCount || 0) > 0) {
+      setDeletingId("");
+      onError(`Este cliente possui ${vehicleCount} veículo(s) vinculado(s). Exclua os veículos primeiro.`);
+      return;
+    }
+
+    const { error } = await supabase.from("customers").delete().eq("id", customer.id);
+    setDeletingId("");
+
+    if (error) {
+      onError("Não foi possível excluir o cliente porque ele ainda possui registros vinculados.");
+      return;
+    }
+
+    onDeleted();
+  }
+
   return <><PageTitle eyebrow="Relacionamento" title="Clientes" copy="Cadastre os proprietários antes de adicionar os veículos." action={<button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 rounded-xl bg-[#b91424] px-5 py-3 text-sm font-black text-white"><Plus size={17} /> Novo cliente</button>} />
     {showForm && <form onSubmit={submit} className="mb-7 grid gap-4 rounded-2xl border border-black/8 bg-white p-6 sm:grid-cols-2 xl:grid-cols-3"><Input label="Nome completo" required value={form.name} onChange={(v) => setForm({ ...form, name: v })} /><Input label="CPF ou CNPJ" value={form.document} onChange={(v) => setForm({ ...form, document: v })} /><Input label="Telefone" required value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} /><Input label="WhatsApp" value={form.whatsapp} onChange={(v) => setForm({ ...form, whatsapp: v })} /><Input label="E-mail" type="email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} /><Input label="Endereço" value={form.address} onChange={(v) => setForm({ ...form, address: v })} /><label className="grid gap-2 text-sm font-bold sm:col-span-2 xl:col-span-3">Observações<textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="rounded-xl border border-black/10 p-3" /></label><div className="flex gap-3 sm:col-span-2 xl:col-span-3"><button className="rounded-xl bg-[#111820] px-5 py-3 font-bold text-white">Salvar cliente</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-black/10 px-5 py-3 font-bold">Cancelar</button></div></form>}
-    <div className="overflow-hidden rounded-2xl border border-black/8 bg-white"><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left"><thead className="bg-[#111820] text-sm text-white"><tr><th className="p-4">Nome</th><th className="p-4">Telefone</th><th className="p-4">Documento</th><th className="p-4">E-mail</th><th className="p-4">Cadastro</th></tr></thead><tbody className="divide-y divide-black/7">{customers.map((c) => <tr key={c.id}><td className="p-4 font-bold">{c.name}</td><td className="p-4">{c.phone}</td><td className="p-4">{c.document || "—"}</td><td className="p-4">{c.email || "—"}</td><td className="p-4">{dateBR(c.created_at)}</td></tr>)}</tbody></table></div>{customers.length === 0 && <Empty text="Nenhum cliente cadastrado." />}</div>
+    <div className="overflow-hidden rounded-2xl border border-black/8 bg-white"><div className="overflow-x-auto"><table className="w-full min-w-[800px] text-left"><thead className="bg-[#111820] text-sm text-white"><tr><th className="p-4">Nome</th><th className="p-4">Telefone</th><th className="p-4">Documento</th><th className="p-4">E-mail</th><th className="p-4">Cadastro</th><th className="p-4 text-right">Ações</th></tr></thead><tbody className="divide-y divide-black/7">{customers.map((customer) => <tr key={customer.id}><td className="p-4 font-bold">{customer.name}</td><td className="p-4">{customer.phone}</td><td className="p-4">{customer.document || "—"}</td><td className="p-4">{customer.email || "—"}</td><td className="p-4">{dateBR(customer.created_at)}</td><td className="p-4 text-right"><button disabled={deletingId === customer.id} onClick={() => void deleteCustomer(customer)} className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-black text-red-700 disabled:opacity-50"><Trash2 size={16} /> {deletingId === customer.id ? "Excluindo..." : "Excluir"}</button></td></tr>)}</tbody></table></div>{customers.length === 0 && <Empty text="Nenhum cliente cadastrado." />}</div>
   </>;
 }
 
-function VehiclesPanel({ vehicles, customers, onSaved, onError, onNewOrder }: { vehicles: Vehicle[]; customers: Customer[]; onSaved: () => void; onError: (e: string) => void; onNewOrder: (id: string) => void }) {
+function VehiclesPanel({ vehicles, customers, onSaved, onDeleted, onError, onNewOrder }: { vehicles: Vehicle[]; customers: Customer[]; onSaved: () => void; onDeleted: () => void; onError: (e: string) => void; onNewOrder: (id: string) => void }) {
   const [showForm, setShowForm] = useState(false);
+  const [deletingId, setDeletingId] = useState("");
   const [form, setForm] = useState({ customer_id: "", plate: "", brand: "", model: "", year: "", color: "", mileage: "", fuel: "", chassis: "", notes: "" });
-  async function submit(e: FormEvent) { e.preventDefault(); const payload = { ...form, plate: normalizePlate(form.plate), year: form.year ? Number(form.year) : null, mileage: form.mileage ? Number(form.mileage) : null }; const { error } = await supabase.from("vehicles").insert(payload); if (error) { onError(error.code === "23505" ? "Esta placa já está cadastrada." : "Não foi possível cadastrar o veículo."); return; } setShowForm(false); setForm({ customer_id: "", plate: "", brand: "", model: "", year: "", color: "", mileage: "", fuel: "", chassis: "", notes: "" }); onSaved(); }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    const payload = { ...form, plate: normalizePlate(form.plate), year: form.year ? Number(form.year) : null, mileage: form.mileage ? Number(form.mileage) : null };
+    const { error } = await supabase.from("vehicles").insert(payload);
+    if (error) {
+      onError(error.code === "23505" ? "Esta placa já está cadastrada." : "Não foi possível cadastrar o veículo.");
+      return;
+    }
+    setShowForm(false);
+    setForm({ customer_id: "", plate: "", brand: "", model: "", year: "", color: "", mileage: "", fuel: "", chassis: "", notes: "" });
+    onSaved();
+  }
+
+  async function deleteVehicle(vehicle: Vehicle) {
+    if (deletingId) return;
+    const confirmed = window.confirm(`Excluir o veículo ${vehicle.plate} — ${vehicle.brand} ${vehicle.model}? Essa ação não pode ser desfeita.`);
+    if (!confirmed) return;
+
+    setDeletingId(vehicle.id);
+
+    const { count: orderCount, error: countError } = await supabase
+      .from("service_orders")
+      .select("id", { count: "exact", head: true })
+      .eq("vehicle_id", vehicle.id);
+
+    if (countError) {
+      setDeletingId("");
+      onError("Não foi possível verificar o histórico deste veículo.");
+      return;
+    }
+
+    if ((orderCount || 0) > 0) {
+      setDeletingId("");
+      onError(`Este veículo possui ${orderCount} ordem(ns) de serviço vinculada(s). Exclua as ordens primeiro.`);
+      return;
+    }
+
+    const { error } = await supabase.from("vehicles").delete().eq("id", vehicle.id);
+    setDeletingId("");
+
+    if (error) {
+      onError("Não foi possível excluir o veículo porque ele ainda possui registros vinculados.");
+      return;
+    }
+
+    onDeleted();
+  }
+
   return <><PageTitle eyebrow="Frota atendida" title="Veículos" copy="Cada placa mantém seu próprio histórico de ordens." action={<button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 rounded-xl bg-[#b91424] px-5 py-3 text-sm font-black text-white"><Plus size={17} /> Novo veículo</button>} />
-    {showForm && <form onSubmit={submit} className="mb-7 grid gap-4 rounded-2xl border border-black/8 bg-white p-6 sm:grid-cols-2 xl:grid-cols-3"><Select label="Proprietário" required value={form.customer_id} onChange={(v) => setForm({ ...form, customer_id: v })} options={customers.map((c) => [c.id, c.name])} /><Input label="Placa" required value={form.plate} onChange={(v) => setForm({ ...form, plate: normalizePlate(v) })} /><Input label="Marca" required value={form.brand} onChange={(v) => setForm({ ...form, brand: v })} /><Input label="Modelo" required value={form.model} onChange={(v) => setForm({ ...form, model: v })} /><Input label="Ano" type="number" value={form.year} onChange={(v) => setForm({ ...form, year: v })} /><Input label="Cor" value={form.color} onChange={(v) => setForm({ ...form, color: v })} /><Input label="Quilometragem" type="number" value={form.mileage} onChange={(v) => setForm({ ...form, mileage: v })} /><Input label="Combustível" value={form.fuel} onChange={(v) => setForm({ ...form, fuel: v })} /><Input label="Chassi" value={form.chassis} onChange={(v) => setForm({ ...form, chassis: v })} /><div className="flex gap-3 sm:col-span-2 xl:col-span-3"><button disabled={!customers.length} className="rounded-xl bg-[#111820] px-5 py-3 font-bold text-white disabled:opacity-40">Salvar veículo</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-black/10 px-5 py-3 font-bold">Cancelar</button></div></form>}
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{vehicles.map((v) => <article key={v.id} className="rounded-2xl border border-black/8 bg-white p-5"><div className="flex items-start justify-between"><span className="rounded-lg bg-[#111820] px-3 py-2 font-black tracking-[.12em] text-white">{v.plate}</span><button onClick={() => onNewOrder(v.id)} className="rounded-lg bg-[#ffe6de] p-2 text-[#d9411e]" title="Nova ordem"><Plus size={18} /></button></div><h2 className="mt-5 text-xl font-black">{v.brand} {v.model}</h2><p className="mt-1 text-sm text-[#6b737d]">{v.year || "Ano não informado"} • {v.color || "Cor não informada"}</p><div className="mt-5 border-t border-black/7 pt-4"><p className="text-xs font-bold uppercase tracking-wider text-[#8a9198]">Proprietário</p><p className="mt-1 font-bold">{v.customer?.name}</p></div></article>)}{vehicles.length === 0 && <Empty text="Nenhum veículo cadastrado." />}</div>
+    {showForm && <form onSubmit={submit} className="mb-7 grid gap-4 rounded-2xl border border-black/8 bg-white p-6 sm:grid-cols-2 xl:grid-cols-3"><Select label="Proprietário" required value={form.customer_id} onChange={(v) => setForm({ ...form, customer_id: v })} options={customers.map((c) => [c.id, c.name])} /><Input label="Placa" required value={form.plate} onChange={(v) => setForm({ ...form, plate: normalizePlate(v) })} /><Input label="Marca" required value={form.brand} onChange={(v) => setForm({ ...form, brand: v })} /><Input label="Modelo" required value={form.model} onChange={(v) => setForm({ ...form, model: v })} /><Input label="Ano" type="number" value={form.year} onChange={(v) => setForm({ ...form, year: v })} /><Input label="Cor" value={form.color} onChange={(v) => setForm({ ...form, color: v })} /><Input label="Quilometragem" type="number" value={form.mileage} onChange={(v) => setForm({ ...form, mileage: v })} /><Input label="Combustível" value={form.fuel} onChange={(v) => setForm({ ...form, fuel: v })} /><Input label="Chassi" value={form.chassis} onChange={(v) => setForm({ ...form, chassis: v })} /><div className="flex gap-3 sm:col-span-2 xl:grid-cols-3"><button disabled={!customers.length} className="rounded-xl bg-[#111820] px-5 py-3 font-bold text-white disabled:opacity-40">Salvar veículo</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-black/10 px-5 py-3 font-bold">Cancelar</button></div></form>}
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{vehicles.map((vehicle) => <article key={vehicle.id} className="rounded-2xl border border-black/8 bg-white p-5"><div className="flex items-start justify-between gap-3"><span className="rounded-lg bg-[#111820] px-3 py-2 font-black tracking-[.12em] text-white">{vehicle.plate}</span><div className="flex gap-2"><button onClick={() => onNewOrder(vehicle.id)} className="rounded-lg bg-[#ffe6de] p-2 text-[#d9411e]" title="Nova ordem"><Plus size={18} /></button><button disabled={deletingId === vehicle.id} onClick={() => void deleteVehicle(vehicle)} className="rounded-lg border border-red-200 bg-red-50 p-2 text-red-700 disabled:opacity-50" title="Excluir veículo"><Trash2 size={18} /></button></div></div><h2 className="mt-5 text-xl font-black">{vehicle.brand} {vehicle.model}</h2><p className="mt-1 text-sm text-[#6b737d]">{vehicle.year || "Ano não informado"} • {vehicle.color || "Cor não informada"}</p><div className="mt-5 border-t border-black/7 pt-4"><p className="text-xs font-bold uppercase tracking-wider text-[#8a9198]">Proprietário</p><p className="mt-1 font-bold">{vehicle.customer?.name}</p></div></article>)}{vehicles.length === 0 && <Empty text="Nenhum veículo cadastrado." />}</div>
   </>;
 }
 
