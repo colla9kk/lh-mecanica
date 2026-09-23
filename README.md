@@ -90,3 +90,6 @@ No painel, abra **Backup** e baixe o JSON pelo menos uma vez por semana. Guarde 
 - Não publique informações de clientes.
 - Proteja os backups.
 - Revise a política de privacidade da oficina.
+
+
+<!-- deploy-trigger: 2026-09-23-185x -->
