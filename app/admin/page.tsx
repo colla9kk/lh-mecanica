@@ -553,13 +553,43 @@ function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order
     if (!confirmed) return;
 
     setDeleting(true);
-    const { error } = await supabase.from("service_orders").delete().eq("id", order.id);
-    setDeleting(false);
+
+    const { data: deletedRows, error } = await supabase
+      .from("service_orders")
+      .delete()
+      .eq("id", order.id)
+      .select("id");
 
     if (error) {
-      onError("Não foi possível excluir esta ordem.");
+      setDeleting(false);
+      onError(`Não foi possível excluir esta ordem: ${error.message}`);
       return;
     }
+
+    if (!deletedRows?.length) {
+      setDeleting(false);
+      onError("O banco não confirmou a exclusão da ordem. Nenhum registro foi apagado.");
+      return;
+    }
+
+    const { data: stillExists, error: verifyError } = await supabase
+      .from("service_orders")
+      .select("id")
+      .eq("id", order.id)
+      .maybeSingle();
+
+    setDeleting(false);
+
+    if (verifyError) {
+      onError(`A exclusão foi enviada, mas não foi possível confirmar no banco: ${verifyError.message}`);
+      return;
+    }
+
+    if (stillExists) {
+      onError("A ordem ainda existe no banco. A exclusão foi bloqueada.");
+      return;
+    }
+
     onDeleted();
   }
 
