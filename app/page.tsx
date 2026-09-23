@@ -22,7 +22,7 @@ export default function Home() {
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 lg:px-8">
           <Link href="/" className="flex items-center gap-3 font-black tracking-tight">
             <img src="/images/logo-lh.jpeg" alt="Logo Mecânica LH" width={96} height={64} className="h-16 w-24 rounded-lg bg-white object-contain" />
-            <span className="leading-none"><span className="block text-lg">{business.shortName}</span><span className="mt-1 block text-[11px] font-bold uppercase tracking-[.18em] text-[#6d747c]">Automotiva</span></span>
+            <span className="leading-none"><span className="block text-lg">Mecânica LH</span><span className="mt-1 block text-[11px] font-bold uppercase tracking-[.18em] text-[#6d747c]">Automotiva</span></span>
           </Link>
           <nav className="hidden items-center gap-8 text-sm font-semibold md:flex">
             <a href="#servicos" className="hover:text-[#b91424]">Serviços</a><a href="#triagem" className="hover:text-[#b91424]">Avaliação</a><a href="#contato" className="hover:text-[#b91424]">Contato</a><Link href="/admin/login" className="text-[#6d747c] hover:text-[#111820]">Área da oficina</Link>
@@ -87,7 +87,7 @@ export default function Home() {
         </div>
       </section>
 
-      <footer id="contato" className="bg-[#0e131b] text-white"><div className="mx-auto grid max-w-7xl gap-8 px-5 py-12 md:grid-cols-3 lg:px-8"><div><img src="/images/logo-lh.jpeg" alt="Mecânica LH — serviços automotivos" width={150} height={100} loading="lazy" className="mb-5 rounded-xl bg-white object-contain" /><h2 className="text-xl font-black">{business.name}</h2><p className="mt-3 text-sm text-white/55">{business.tagline}</p></div><div className="space-y-4 text-sm text-white/80"><a href={`tel:+${business.whatsapp}`} className="flex items-center gap-2"><Phone size={17} /> {business.phone}</a><a href={`mailto:${business.email}`} className="block break-all underline underline-offset-4">{business.email}</a><p className="flex gap-2"><MapPin size={17} /> {business.address}</p></div><div className="text-sm text-white/65 md:text-right"><p>{business.hours}</p><p className="mt-3">© {new Date().getFullYear()} {business.shortName}</p></div></div></footer>
+      <footer id="contato" className="bg-[#0e131b] text-white"><div className="mx-auto grid max-w-7xl gap-8 px-5 py-12 md:grid-cols-3 lg:px-8"><div><img src="/images/logo-lh.jpeg" alt="Mecânica LH — serviços automotivos" width={150} height={100} loading="lazy" className="mb-5 rounded-xl bg-white object-contain" /><h2 className="text-xl font-black">Mecânica LH</h2><p className="mt-3 text-sm text-white/55">{business.tagline}</p></div><div className="space-y-4 text-sm text-white/80"><a href={`tel:+${business.whatsapp}`} className="flex items-center gap-2"><Phone size={17} /> {business.phone}</a><a href={`mailto:${business.email}`} className="block break-all underline underline-offset-4">{business.email}</a><p className="flex gap-2"><MapPin size={17} /> {business.address}</p></div><div className="text-sm text-white/65 md:text-right"><p>{business.hours}</p><p className="mt-3">© {new Date().getFullYear()} Mecânica LH</p></div></div></footer>
     </main>
   );
 }
