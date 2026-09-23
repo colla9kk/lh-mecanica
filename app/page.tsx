@@ -25,11 +25,11 @@ export default function Home() {
             <span className="leading-none"><span className="block text-lg">Mecânica LH</span><span className="mt-1 block text-[11px] font-bold uppercase tracking-[.18em] text-[#6d747c]">Automotiva</span></span>
           </Link>
           <nav className="hidden items-center gap-8 text-sm font-semibold md:flex">
-            <a href="#servicos" className="hover:text-[#b91424]">Serviços</a><a href="#triagem" className="hover:text-[#b91424]">Avaliação</a><a href="#contato" className="hover:text-[#b91424]">Contato</a><Link href="/admin/login" className="text-[#6d747c] hover:text-[#111820]">Área da oficina</Link>
+            <a href="#servicos" className="hover:text-[#b91424]">Serviços</a><a href="#triagem" className="hover:text-[#b91424]">Avaliação</a><a href="#contato" className="hover:text-[#b91424]">Contato</a><a href="/admin/login" className="text-[#6d747c] hover:text-[#111820]">Área da oficina</a>
           </nav>
           <button className="md:hidden" aria-label="Abrir menu" onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X /> : <Menu />}</button>
         </div>
-        {menuOpen && <nav className="border-t border-black/10 bg-white px-5 py-4 md:hidden"><a href="#servicos" className="block py-3" onClick={() => setMenuOpen(false)}>Serviços</a><a href="#triagem" className="block py-3" onClick={() => setMenuOpen(false)}>Solicitar avaliação</a><a href="#contato" className="block py-3" onClick={() => setMenuOpen(false)}>Contato</a><Link href="/admin/login" className="block py-3">Área da oficina</Link></nav>}
+        {menuOpen && <nav className="border-t border-black/10 bg-white px-5 py-4 md:hidden"><a href="#servicos" className="block py-3" onClick={() => setMenuOpen(false)}>Serviços</a><a href="#triagem" className="block py-3" onClick={() => setMenuOpen(false)}>Solicitar avaliação</a><a href="#contato" className="block py-3" onClick={() => setMenuOpen(false)}>Contato</a><a href="/admin/login" className="block py-3">Área da oficina</a></nav>}
       </header>
 
       <section className="relative overflow-hidden bg-[#0e131b] text-white">
