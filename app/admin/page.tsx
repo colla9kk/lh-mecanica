@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   CarFront, ChevronRight, CircleDollarSign, ClipboardList, Download, FileDown,
-  LayoutDashboard, LogOut, Menu, Plus, RefreshCw, Search, Share2, UserRound, Users, Wrench, X,
+  LayoutDashboard, LogOut, Menu, Plus, RefreshCw, Save, Search, Share2, Trash2, UserRound, Users, Wrench, X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { dateBR, money, normalizePlate, today } from "@/lib/format";
@@ -152,7 +152,7 @@ export default function AdminPage() {
         </section>
       </div>
 
-      {selectedOrder && <OrderDetails order={selectedOrder} onClose={() => setSelectedOrder(null)} onChanged={async () => { await loadData(); setSelectedOrder(null); notify("Ordem atualizada."); }} onError={setError} />}
+      {selectedOrder && <OrderDetails order={selectedOrder} onClose={() => setSelectedOrder(null)} onChanged={async () => { await loadData(); setSelectedOrder(null); notify("Ordem atualizada."); }} onDeleted={async () => { await loadData(); setSelectedOrder(null); notify("Ordem excluída."); }} onError={setError} />}
     </main>
   );
 }
@@ -323,7 +323,7 @@ function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, 
       </div>
       <label className="mt-4 grid gap-2 text-sm font-bold">Problema relatado<textarea required rows={3} value={form.reported_problem} onChange={(e) => setForm({ ...form, reported_problem: e.target.value })} className="rounded-xl border border-black/10 p-3" /></label>
       <div className="mt-7 flex items-center justify-between"><h2 className="font-black">Serviços e peças</h2><button type="button" onClick={() => setItems([...items, { ...emptyItem }])} className="text-sm font-black text-[#b91424]">+ Adicionar item</button></div>
-      <div className="mt-3 space-y-3">{items.map((item, index) => <div key={index} className="grid gap-3 rounded-xl bg-[#f5f5f2] p-3 md:grid-cols-[150px_1fr_90px_140px_40px]"><select value={item.type} onChange={(e) => updateItem(index, "type", e.target.value)} className="rounded-lg border border-black/10 bg-white px-3"><option value="servico">Serviço</option><option value="mao_de_obra">Mão de obra</option><option value="peca">Peça</option></select><input placeholder="Descrição" value={item.description} onChange={(e) => updateItem(index, "description", e.target.value)} className="min-h-11 rounded-lg border border-black/10 px-3" /><input aria-label="Quantidade" type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateItem(index, "quantity", e.target.value)} className="rounded-lg border border-black/10 px-3" /><input aria-label="Valor unitário" type="number" min="0" step="0.01" value={item.unit_price} onChange={(e) => updateItem(index, "unit_price", e.target.value)} className="rounded-lg border border-black/10 px-3" /><button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))} className="grid place-items-center text-red-500"><X size={18} /></button></div>)}</div>
+      <div className="mt-3 hidden grid-cols-[150px_1fr_90px_140px_40px] gap-3 px-3 text-xs font-black uppercase tracking-wide text-[#7a828a] md:grid"><span>Tipo</span><span>Descrição</span><span>Qtd.</span><span>Preço unit. (R$)</span><span></span></div><div className="mt-2 space-y-3">{items.map((item, index) => <div key={index} className="grid gap-3 rounded-xl bg-[#f5f5f2] p-3 md:grid-cols-[150px_1fr_90px_140px_40px]"><select value={item.type} onChange={(e) => updateItem(index, "type", e.target.value)} className="rounded-lg border border-black/10 bg-white px-3"><option value="servico">Serviço</option><option value="mao_de_obra">Mão de obra</option><option value="peca">Peça</option></select><input placeholder="Descrição" value={item.description} onChange={(e) => updateItem(index, "description", e.target.value)} className="min-h-11 rounded-lg border border-black/10 px-3" /><input aria-label="Quantidade" type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateItem(index, "quantity", e.target.value)} className="rounded-lg border border-black/10 px-3" /><input aria-label="Preço unitário em reais" placeholder="Preço R$" type="number" min="0" step="0.01" value={item.unit_price} onChange={(e) => updateItem(index, "unit_price", e.target.value)} className="rounded-lg border border-black/10 px-3" /><button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))} className="grid place-items-center text-red-500"><X size={18} /></button></div>)}</div>
       <div className="mt-6 grid gap-4 sm:grid-cols-2"><label className="grid gap-2 text-sm font-bold">Diagnóstico<textarea rows={3} value={form.diagnosis} onChange={(e) => setForm({ ...form, diagnosis: e.target.value })} className="rounded-xl border border-black/10 p-3" /></label><label className="grid gap-2 text-sm font-bold">Observações<textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="rounded-xl border border-black/10 p-3" /></label></div>
       <div className="mt-6 flex flex-col items-end gap-2 border-t border-black/8 pt-5"><Input label="Desconto" type="number" value={form.discount} onChange={(v) => setForm({ ...form, discount: v })} /><p className="text-sm text-[#6b737d]">Peças: {money(totals.parts_total)} • Serviços: {money(totals.labor_total)}</p><p className="text-2xl font-black">Total: {money(totals.total)}</p></div>
       <div className="mt-6 flex gap-3"><button disabled={!matchedVehicle} className="rounded-xl bg-[#111820] px-5 py-3 font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Criar ordem</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-black/10 px-5 py-3 font-bold">Cancelar</button></div>
@@ -338,10 +338,16 @@ function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, 
   </>;
 }
 
-function OrderDetails({ order, onClose, onChanged, onError }: { order: ServiceOrder; onClose: () => void; onChanged: () => void; onError: (e: string) => void }) {
+function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order: ServiceOrder; onClose: () => void; onChanged: () => void; onDeleted: () => void; onError: (e: string) => void }) {
   const [newItem, setNewItem] = useState<ServiceItem>({ ...emptyItem });
+  const [editedItems, setEditedItems] = useState<ServiceItem[]>((order.items || []).map((item) => ({ ...item })));
+  const [deleting, setDeleting] = useState(false);
   const locked = order.status === "entregue";
   const shareReady = order.status === "concluida" || order.status === "entregue";
+
+  useEffect(() => {
+    setEditedItems((order.items || []).map((item) => ({ ...item })));
+  }, [order.items]);
 
   async function updateStatus(status: OrderStatus) {
     if (order.status === "entregue") return;
@@ -376,6 +382,64 @@ function OrderDetails({ order, onClose, onChanged, onError }: { order: ServiceOr
     onChanged();
   }
 
+  function updateEditedItem(index: number, field: keyof ServiceItem, value: string) {
+    setEditedItems((current) => current.map((item, i) => {
+      if (i !== index) return item;
+      const next = {
+        ...item,
+        [field]: field === "quantity" || field === "unit_price" ? Number(value) : value,
+      };
+      return { ...next, subtotal: Number(next.quantity) * Number(next.unit_price) };
+    }));
+  }
+
+  async function saveEditedItem(index: number) {
+    if (locked) return;
+    const item = editedItems[index];
+    if (!item?.id || !item.description.trim()) return;
+
+    const subtotal = Number(item.quantity) * Number(item.unit_price);
+    const nextItems = editedItems.map((current, i) => i === index ? { ...current, subtotal } : current);
+    const totals = calculateTotals(nextItems, Number(order.discount));
+
+    const { error: itemError } = await supabase.from("service_order_items").update({
+      type: item.type,
+      description: item.description,
+      quantity: Number(item.quantity),
+      unit_price: Number(item.unit_price),
+      subtotal,
+    }).eq("id", item.id);
+
+    if (itemError) {
+      onError("Não foi possível salvar o preço do item.");
+      return;
+    }
+
+    const { error: orderError } = await supabase.from("service_orders").update(totals).eq("id", order.id);
+    if (orderError) {
+      onError("O item foi salvo, mas não foi possível recalcular o total da OS.");
+      return;
+    }
+
+    onChanged();
+  }
+
+  async function deleteOrder() {
+    if (locked || deleting) return;
+    const confirmed = window.confirm(`Excluir definitivamente a ${order.order_number}? Essa ação também apaga os itens desta ordem e não pode ser desfeita.`);
+    if (!confirmed) return;
+
+    setDeleting(true);
+    const { error } = await supabase.from("service_orders").delete().eq("id", order.id);
+    setDeleting(false);
+
+    if (error) {
+      onError("Não foi possível excluir esta ordem.");
+      return;
+    }
+    onDeleted();
+  }
+
   async function shareWhatsapp() {
     if (!shareReady) return;
     const message = `Olá! Segue a ${order.order_number} do veículo ${order.vehicle?.plate || ""}. Status: ${statusLabels[order.status]}. Valor: ${money(order.total)}.`;
@@ -407,12 +471,33 @@ function OrderDetails({ order, onClose, onChanged, onError }: { order: ServiceOr
   return <div className="fixed inset-0 z-[70] bg-black/55 p-3 backdrop-blur-sm sm:p-6"><div className="ml-auto h-full w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl"><div className="sticky top-0 z-10 flex items-start justify-between border-b border-black/8 bg-white p-5 sm:p-7"><div><p className="text-sm font-bold text-[#b91424]">{order.order_number}</p><h2 className="mt-1 text-2xl font-black">{order.vehicle?.plate} • {order.vehicle?.brand} {order.vehicle?.model}</h2></div><button onClick={onClose} aria-label="Fechar"><X /></button></div>
     <div className="p-5 sm:p-7"><div className="grid gap-4 rounded-2xl bg-[#f5f5f2] p-5 sm:grid-cols-3"><div><small>Cliente</small><p className="font-bold">{order.customer?.name}</p></div><div><small>Entrada</small><p className="font-bold">{dateBR(order.entry_date)}</p></div><div><small>Status</small><Status status={order.status} /></div></div>
       <div className="mt-6"><h3 className="font-black">Problema relatado</h3><p className="mt-2 leading-7 text-[#59626c]">{order.reported_problem}</p>{order.diagnosis && <><h3 className="mt-5 font-black">Diagnóstico</h3><p className="mt-2 leading-7 text-[#59626c]">{order.diagnosis}</p></>}</div>
-      <div className="mt-7"><h3 className="font-black">Itens</h3><div className="mt-3 divide-y divide-black/7 rounded-xl border border-black/8">{(order.items || []).map((item, i) => <div key={item.id || i} className="grid grid-cols-[1fr_auto] gap-3 p-4"><div><b>{item.description}</b><p className="text-sm text-[#6b737d]">{item.quantity} × {money(item.unit_price)}</p></div><b>{money(item.subtotal)}</b></div>)}{!order.items?.length && <Empty text="Nenhum item lançado." />}</div></div>
-      {!locked && <form onSubmit={addItem} className="mt-5 grid gap-3 rounded-xl bg-[#fff4f0] p-4 md:grid-cols-[130px_1fr_90px_130px_auto]"><select value={newItem.type} onChange={(e) => setNewItem({ ...newItem, type: e.target.value as ServiceItem["type"] })} className="rounded-lg border border-black/10 bg-white px-3"><option value="servico">Serviço</option><option value="mao_de_obra">Mão de obra</option><option value="peca">Peça</option></select><input required placeholder="Novo item" value={newItem.description} onChange={(e) => setNewItem({ ...newItem, description: e.target.value })} className="min-h-11 rounded-lg border border-black/10 px-3" /><input type="number" min=".01" step=".01" value={newItem.quantity} onChange={(e) => setNewItem({ ...newItem, quantity: Number(e.target.value) })} className="rounded-lg border border-black/10 px-3" /><input type="number" min="0" step=".01" value={newItem.unit_price} onChange={(e) => setNewItem({ ...newItem, unit_price: Number(e.target.value) })} className="rounded-lg border border-black/10 px-3" /><button className="rounded-lg bg-[#b91424] px-4 font-black text-white">Adicionar</button></form>}
+
+      <div className="mt-7"><div className="flex items-center justify-between"><div><h3 className="font-black">Serviços, peças e preços</h3><p className="mt-1 text-sm text-[#6b737d]">Altere a quantidade ou o preço unitário e clique em Salvar. O total da OS é recalculado automaticamente.</p></div></div>
+        <div className="mt-3 space-y-3">
+          {editedItems.map((item, i) => <div key={item.id || i} className="rounded-xl border border-black/8 p-4">
+            {locked ? <div className="grid grid-cols-[1fr_auto] gap-3"><div><b>{item.description}</b><p className="text-sm text-[#6b737d]">{item.quantity} × {money(item.unit_price)}</p></div><b>{money(item.subtotal)}</b></div> :
+            <div className="grid gap-3 md:grid-cols-[130px_1fr_85px_130px_auto]">
+              <select value={item.type} onChange={(e) => updateEditedItem(i, "type", e.target.value)} className="min-h-11 rounded-lg border border-black/10 bg-white px-3"><option value="servico">Serviço</option><option value="mao_de_obra">Mão de obra</option><option value="peca">Peça</option></select>
+              <input aria-label="Descrição do item" value={item.description} onChange={(e) => updateEditedItem(i, "description", e.target.value)} className="min-h-11 rounded-lg border border-black/10 px-3" />
+              <label className="grid gap-1 text-xs font-bold text-[#6b737d]">Qtd.<input type="number" min=".01" step=".01" value={item.quantity} onChange={(e) => updateEditedItem(i, "quantity", e.target.value)} className="min-h-11 rounded-lg border border-black/10 px-3 text-black" /></label>
+              <label className="grid gap-1 text-xs font-bold text-[#6b737d]">Preço (R$)<input type="number" min="0" step=".01" value={item.unit_price} onChange={(e) => updateEditedItem(i, "unit_price", e.target.value)} className="min-h-11 rounded-lg border border-black/10 px-3 text-black" /></label>
+              <button type="button" onClick={() => void saveEditedItem(i)} className="flex min-h-11 items-center justify-center gap-2 rounded-lg bg-[#111820] px-4 text-sm font-black text-white"><Save size={16} /> Salvar</button>
+            </div>}
+            {!locked && <p className="mt-2 text-right text-sm font-black">Subtotal: {money(Number(item.quantity) * Number(item.unit_price))}</p>}
+          </div>)}
+          {!editedItems.length && <Empty text="Nenhum item lançado." />}
+        </div>
+      </div>
+
+      {!locked && <form onSubmit={addItem} className="mt-5 rounded-xl bg-[#fff4f0] p-4"><p className="mb-3 text-sm font-black">Adicionar novo item com preço</p><div className="grid gap-3 md:grid-cols-[130px_1fr_90px_140px_auto]"><select value={newItem.type} onChange={(e) => setNewItem({ ...newItem, type: e.target.value as ServiceItem["type"] })} className="rounded-lg border border-black/10 bg-white px-3"><option value="servico">Serviço</option><option value="mao_de_obra">Mão de obra</option><option value="peca">Peça</option></select><input required placeholder="Descrição" value={newItem.description} onChange={(e) => setNewItem({ ...newItem, description: e.target.value })} className="min-h-11 rounded-lg border border-black/10 px-3" /><input aria-label="Quantidade" title="Quantidade" type="number" min=".01" step=".01" value={newItem.quantity} onChange={(e) => setNewItem({ ...newItem, quantity: Number(e.target.value) })} className="rounded-lg border border-black/10 px-3" /><input aria-label="Preço unitário em reais" title="Preço unitário em reais" placeholder="R$" type="number" min="0" step=".01" value={newItem.unit_price} onChange={(e) => setNewItem({ ...newItem, unit_price: Number(e.target.value) })} className="rounded-lg border border-black/10 px-3" /><button className="rounded-lg bg-[#b91424] px-4 font-black text-white">Adicionar</button></div><p className="mt-2 text-right text-sm font-bold">Subtotal: {money(Number(newItem.quantity) * Number(newItem.unit_price))}</p></form>}
+
       {locked && <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-800">Esta ordem foi entregue e está bloqueada. Crie uma nova OS para registrar outro atendimento.</p>}
       <div className="mt-7 flex items-end justify-between border-t border-black/8 pt-6"><div className="flex flex-wrap gap-2">{order.status === "concluida" && <button onClick={() => updateStatus("em_andamento")} className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800">Reabrir ordem</button>}{!locked && <select value={order.status} onChange={(e) => updateStatus(e.target.value as OrderStatus)} className="rounded-xl border border-black/10 px-3 py-2 text-sm font-bold">{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>}</div><div className="text-right"><p className="text-sm text-[#6b737d]">Total da ordem</p><p className="text-3xl font-black">{money(order.total)}</p></div></div>
+
       <div className="mt-7 grid gap-3 sm:grid-cols-2"><button onClick={() => downloadOrderPdf(order)} className="flex items-center justify-center gap-2 rounded-xl bg-[#111820] px-5 py-3 font-black text-white"><FileDown size={18} /> Baixar PDF</button><button disabled={!shareReady} onClick={() => void shareWhatsapp()} className="flex items-center justify-center gap-2 rounded-xl border border-black/10 px-5 py-3 font-black disabled:cursor-not-allowed disabled:bg-black/[.03] disabled:text-black/35"><Share2 size={18} /> {shareReady ? "Compartilhar PDF no WhatsApp" : "Conclua a OS para compartilhar"}</button></div>
       {!shareReady && <p className="mt-2 text-center text-xs font-semibold text-[#7a828a]">O compartilhamento é liberado quando a ordem estiver como Concluída ou Entregue.</p>}
+
+      <div className="mt-8 border-t border-red-100 pt-6"><button disabled={locked || deleting} onClick={() => void deleteOrder()} className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-black text-red-700 disabled:cursor-not-allowed disabled:opacity-40"><Trash2 size={17} /> {deleting ? "Excluindo..." : "Excluir ordem de serviço"}</button>{locked && <p className="mt-2 text-xs font-semibold text-[#8a9198]">Ordens já entregues ficam bloqueadas para preservar o histórico.</p>}</div>
     </div></div></div>;
 }
 
