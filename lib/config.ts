@@ -2,11 +2,11 @@ export const business = {
   name: "LH Mecânica Automotiva",
   shortName: "LH Mecânica",
   tagline: "Socorro 24 horas e manutenção automotiva",
-  phone: "(13) 99999-9999",
-  whatsapp: "5513999999999",
+  phone: "(13) 99684-8904",
+  whatsapp: "55139996848904",
   address: "Guarujá - SP",
-  hours: "Segunda a sábado, das 8h às 18h • Socorro 24h",
-  email: "contato@lhmecanica.com.br",
+  hours: "Consulte os horários de atendimento pelo WhatsApp.",
+  email: "Jesushenry255@gmail.com",
 };
 
 export const serviceHighlights = [

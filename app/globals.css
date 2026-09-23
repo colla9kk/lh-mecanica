@@ -25,7 +25,7 @@
   --card-foreground: #171717;
   --popover: #ffffff;
   --popover-foreground: #171717;
-  --primary: #e8502a;
+  --primary: #b91424;
   --primary-foreground: #fafafa;
   --secondary: #f5f5f5;
   --secondary-foreground: #171717;
@@ -102,4 +102,4 @@ body {
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
-button, a, input, select, textarea { outline-color: #e8502a; }
+button, a, input, select, textarea { outline-color: #b91424; }
