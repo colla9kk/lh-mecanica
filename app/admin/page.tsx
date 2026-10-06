@@ -45,7 +45,7 @@ export default function AdminPage() {
     }
     setCustomers((customersResult.data || []) as Customer[]);
     setVehicles((vehiclesResult.data || []) as unknown as Vehicle[]);
-    setOrders((ordersResult.data || []) as unknown as ServiceOrder[]);
+    setOrders(((ordersResult.data || []) as unknown as ServiceOrder[]).map(withDownPayment));
     setLoading(false);
   }, []);
 
@@ -334,9 +334,8 @@ function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, 
       mileage: form.mileage ? Number(form.mileage) : null,
       reported_problem: form.reported_problem,
       diagnosis: form.diagnosis || null,
-      notes: form.notes || null,
+      notes: withDownPaymentNote(form.notes || null, downPayment),
       status: "aberta",
-      down_payment: downPayment,
       ...totals,
     }).select().single();
 
@@ -445,7 +444,8 @@ function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order
       onError("A entrada paga deve estar entre R$ 0,00 e o total da ordem.");
       return;
     }
-    const { error } = await supabase.from("service_orders").update({ down_payment: value }).eq("id", order.id);
+    const notes = withDownPaymentNote(order.notes || null, value);
+    const { error } = await supabase.from("service_orders").update({ notes }).eq("id", order.id);
     if (error) {
       onError("Não foi possível salvar a entrada paga.");
       return;
@@ -494,6 +494,10 @@ function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order
     const subtotal = Number(item.quantity) * Number(item.unit_price);
     const nextItems = editedItems.map((current, i) => i === index ? { ...current, subtotal } : current);
     const totals = calculateTotals(nextItems, Number(order.discount));
+    if (totals.total < savedDownPayment) {
+      onError("O total da OS não pode ficar menor que a entrada já paga.");
+      return;
+    }
 
     const { error: itemError } = await supabase.from("service_order_items").update({
       type: item.type,
@@ -611,6 +615,33 @@ function Select({ label, value, onChange, options, required = false }: { label: 
   return <label className="grid gap-2 text-sm font-bold">{label}<select required={required} value={value} onChange={(e) => onChange(e.target.value)} className="min-h-11 rounded-xl border border-black/10 bg-white px-3"><option value="">Selecione</option>{options.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>;
 }
 function Empty({ text }: { text: string }) { return <p className="col-span-full py-10 text-center text-sm text-[#7a828a]">{text}</p>; }
+const DOWN_PAYMENT_NOTE = /(?:^|\n)\[\[LH_DOWN_PAYMENT:([0-9]+(?:\.[0-9]{1,2})?)\]\](?:\n|$)/g;
+
+function readDownPayment(order: { down_payment?: number; notes?: string | null }) {
+  let marked: number | null = null;
+  const notes = order.notes || "";
+  for (const match of notes.matchAll(DOWN_PAYMENT_NOTE)) {
+    const value = Number(match[1]);
+    if (Number.isFinite(value) && value >= 0) marked = value;
+  }
+  DOWN_PAYMENT_NOTE.lastIndex = 0;
+  if (marked !== null) return marked;
+  const direct = Number(order.down_payment || 0);
+  return Number.isFinite(direct) && direct >= 0 ? direct : 0;
+}
+
+function withDownPayment(order: ServiceOrder): ServiceOrder {
+  return { ...order, down_payment: readDownPayment(order) };
+}
+
+function withDownPaymentNote(notes: string | null, value: number) {
+  DOWN_PAYMENT_NOTE.lastIndex = 0;
+  const clean = (notes || "").replace(DOWN_PAYMENT_NOTE, "\n").trim();
+  DOWN_PAYMENT_NOTE.lastIndex = 0;
+  const marker = `[[LH_DOWN_PAYMENT:${Math.max(0, value).toFixed(2)}]]`;
+  return clean ? `${clean}\n${marker}` : marker;
+}
+
 function calculateTotals(items: ServiceItem[], discount: number) {
   const parts_total = items.filter((i) => i.type === "peca").reduce((sum, i) => sum + Number(i.quantity) * Number(i.unit_price), 0);
   const labor_total = items.filter((i) => i.type !== "peca").reduce((sum, i) => sum + Number(i.quantity) * Number(i.unit_price), 0);
