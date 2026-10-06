@@ -37,13 +37,6 @@ Edite `lib/config.ts` e troque nome, telefone, WhatsApp, endereço, horário e e
 5. Em **Authentication > Users**, crie manualmente o usuário da oficina.
 6. Em **Project Settings > API**, copie a URL e a chave pública `anon`.
 
-### Entrada paga e saldo restante
-
-O painel é compatível com bancos existentes: a entrada paga funciona mesmo antes
-da migração da coluna dedicada. Para deixar o banco com a estrutura definitiva,
-pode ser aplicada posteriormente a migração
-`supabase/migrations/20261006_add_down_payment.sql`, sem interromper o site.
-
 ### Atualizar um banco já existente (correção das exclusões)
 
 No **SQL Editor** do Supabase, execute o conteúdo de
