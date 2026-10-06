@@ -21,7 +21,7 @@ function buildOrderPdf(order: ServiceOrder) {
   doc.text(statusLabels[order.status].toUpperCase(), 196, 23, { align: "right" });
 
   doc.setTextColor(24); doc.setFontSize(10);
-  doc.text(`Entrada: ${dateBR(order.entry_date)}`, 14, 45);
+  doc.text(`Entrada do veículo: ${dateBR(order.entry_date)}`, 14, 45);
   doc.text(`Previsão: ${dateBR(order.expected_delivery_date)}`, 74, 45);
   doc.text(`Quilometragem: ${order.mileage?.toLocaleString("pt-BR") || "—"} km`, 140, 45);
 
@@ -66,10 +66,15 @@ function buildOrderPdf(order: ServiceOrder) {
   doc.text(`Peças: ${money(order.parts_total)}`, 196, y, { align: "right" });
   doc.text(`Mão de obra/serviços: ${money(order.labor_total)}`, 196, y + 6, { align: "right" });
   doc.text(`Desconto: ${money(order.discount)}`, 196, y + 12, { align: "right" });
+  const downPayment = Number(order.down_payment || 0);
+  const balanceDue = Math.max(Number(order.total) - downPayment, 0);
+  doc.text(`Entrada paga: ${money(downPayment)}`, 196, y + 18, { align: "right" });
   doc.setFont("helvetica", "bold"); doc.setFontSize(13);
-  doc.text(`TOTAL: ${money(order.total)}`, 196, y + 21, { align: "right" });
+  doc.text(`TOTAL: ${money(order.total)}`, 196, y + 27, { align: "right" });
+  doc.setFontSize(12);
+  doc.text(`SALDO RESTANTE: ${money(balanceDue)}`, 196, y + 35, { align: "right" });
 
-  const signatureY = Math.max(y + 46, 250);
+  const signatureY = Math.max(y + 58, 250);
   if (signatureY < 283) {
     doc.setDrawColor(130);
     doc.line(18, signatureY, 88, signatureY);
