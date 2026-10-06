@@ -28,6 +28,7 @@ create table if not exists public.service_orders (
   labor_total numeric(12,2) not null default 0 check (labor_total >= 0),
   parts_total numeric(12,2) not null default 0 check (parts_total >= 0),
   discount numeric(12,2) not null default 0 check (discount >= 0),
+  down_payment numeric(12,2) not null default 0 check (down_payment >= 0),
   total numeric(12,2) not null default 0 check (total >= 0),
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
