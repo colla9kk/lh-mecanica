@@ -25,7 +25,7 @@ export type ServiceOrder = {
   entry_date: string; expected_delivery_date: string | null; completed_at: string | null;
   mileage: number | null; reported_problem: string; diagnosis: string | null;
   notes: string | null; status: OrderStatus; labor_total: number; parts_total: number;
-  discount: number; down_payment: number; total: number; created_at: string; updated_at: string;
+  discount: number; down_payment?: number; total: number; created_at: string; updated_at: string;
   customer?: Customer; vehicle?: Vehicle; items?: ServiceItem[];
 };
 
