@@ -37,6 +37,13 @@ Edite `lib/config.ts` e troque nome, telefone, WhatsApp, endereço, horário e e
 5. Em **Authentication > Users**, crie manualmente o usuário da oficina.
 6. Em **Project Settings > API**, copie a URL e a chave pública `anon`.
 
+### Atualizar um banco já existente (entrada paga e saldo)
+
+Antes de publicar a versão com controle de entrada, execute no **SQL Editor** do
+Supabase o arquivo `supabase/migrations/20261006_add_down_payment.sql`.
+A migração preserva as OS existentes e define a entrada delas como R$ 0,00.
+Depois disso, publique/mescle a versão do site.
+
 ### Atualizar um banco já existente (correção das exclusões)
 
 No **SQL Editor** do Supabase, execute o conteúdo de
