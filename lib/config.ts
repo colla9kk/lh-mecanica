@@ -7,6 +7,9 @@ export const business = {
   address: "Guarujá - SP",
   hours: "Consulte os horários de atendimento pelo WhatsApp.",
   email: "Jesushenry255@gmail.com",
+  pixKey: "48750043897",
+  pixRecipient: "LH MECANICA",
+  pixCity: "GUARUJA",
 };
 
 export const serviceHighlights = [
