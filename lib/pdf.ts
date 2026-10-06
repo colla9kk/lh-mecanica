@@ -40,12 +40,13 @@ function renderOrderPdf(order: ServiceOrder, logo: string | null, compactLevel: 
   const downPayment = Number(order.down_payment || 0);
   const balanceDue = Math.max(Number(order.total) - downPayment, 0);
   const warranty = order.warranty?.trim() || "Não informada";
+  const warrantyHighlight = warranty === "Não informada" ? "GARANTIA NÃO INFORMADA" : warranty.toLowerCase().startsWith("sem ") ? warranty.toUpperCase() : `GARANTIA DE ${warranty.toUpperCase()}`;
   const subtotalBeforeDiscount = Number(order.parts_total) + Number(order.labor_total);
 
   const density = [
     { tableFont: 7.8, pad: 1.5, narrativeFont: 7.5, narrativePad: 1.5, financeH: 32 },
-    { tableFont: 6.8, pad: 1.1, narrativeFont: 6.8, narrativePad: 1.1, financeH: 29 },
-    { tableFont: 5.9, pad: 0.8, narrativeFont: 6.1, narrativePad: 0.8, financeH: 27 },
+    { tableFont: 6.8, pad: 1.1, narrativeFont: 6.8, narrativePad: 1.1, financeH: 32 },
+    { tableFont: 5.9, pad: 0.8, narrativeFont: 6.1, narrativePad: 0.8, financeH: 32 },
   ][Math.min(compactLevel, 2)];
 
   doc.setFillColor(185, 20, 36);
@@ -146,7 +147,7 @@ function renderOrderPdf(order: ServiceOrder, logo: string | null, compactLevel: 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(8.8);
   doc.setTextColor(153, 39, 25);
-  doc.text(`GARANTIA: ${warranty.toUpperCase()}`, 18, y + 5.8);
+  doc.text(warrantyHighlight, 18, y + 5.8);
   y += 13;
 
   autoTable(doc, {
