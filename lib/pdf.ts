@@ -21,7 +21,7 @@ function buildOrderPdf(order: ServiceOrder) {
   doc.text(statusLabels[order.status].toUpperCase(), 196, 23, { align: "right" });
 
   doc.setTextColor(24); doc.setFontSize(10);
-  doc.text(`Entrada do veículo: ${dateBR(order.entry_date)}`, 14, 45);
+  doc.text(`Data de entrada: ${dateBR(order.entry_date)}`, 14, 45);
   doc.text(`Previsão: ${dateBR(order.expected_delivery_date)}`, 74, 45);
   doc.text(`Quilometragem: ${order.mileage?.toLocaleString("pt-BR") || "—"} km`, 140, 45);
 
