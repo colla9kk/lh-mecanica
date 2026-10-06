@@ -45,7 +45,7 @@ export default function AdminPage() {
     }
     setCustomers((customersResult.data || []) as Customer[]);
     setVehicles((vehiclesResult.data || []) as unknown as Vehicle[]);
-    setOrders((ordersResult.data || []) as unknown as ServiceOrder[]);
+    setOrders(((ordersResult.data || []) as unknown as ServiceOrder[]).map(withDownPayment));
     setLoading(false);
   }, []);
 
@@ -282,7 +282,7 @@ function VehiclesPanel({ vehicles, customers, onSaved, onDeleted, onError, onNew
 function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, onError, onSelectOrder }: { orders: ServiceOrder[]; vehicles: Vehicle[]; presetVehicleId: string; clearPreset: () => void; onSaved: () => void; onError: (e: string) => void; onSelectOrder: (o: ServiceOrder) => void }) {
   const initialVehicle = vehicles.find((vehicle) => vehicle.id === presetVehicleId);
   const [showForm, setShowForm] = useState(Boolean(presetVehicleId));
-  const [form, setForm] = useState({ vehicle_id: presetVehicleId, plate: initialVehicle?.plate || "", entry_date: today(), expected_delivery_date: "", mileage: "", reported_problem: "", diagnosis: "", notes: "", discount: "0" });
+  const [form, setForm] = useState({ vehicle_id: presetVehicleId, plate: initialVehicle?.plate || "", entry_date: today(), expected_delivery_date: "", mileage: "", reported_problem: "", diagnosis: "", notes: "", discount: "0", down_payment: "0" });
   const [items, setItems] = useState<ServiceItem[]>([{ ...emptyItem }]);
   const [orderSearch, setOrderSearch] = useState("");
 
@@ -296,6 +296,8 @@ function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, 
 
   const matchedVehicle = vehicles.find((vehicle) => vehicle.plate === normalizePlate(form.plate));
   const totals = useMemo(() => calculateTotals(items, Number(form.discount || 0)), [items, form.discount]);
+  const downPayment = Number(form.down_payment || 0);
+  const balanceDue = Math.max(totals.total - downPayment, 0);
 
   function updateItem(index: number, field: keyof ServiceItem, value: string) {
     setItems((current) => current.map((item, i) => {
@@ -320,6 +322,10 @@ function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, 
     }
 
     const validItems = items.filter((item) => item.description.trim());
+    if (downPayment < 0 || downPayment > totals.total) {
+      onError("A entrada paga deve estar entre R$ 0,00 e o total da ordem.");
+      return;
+    }
     const { data, error } = await supabase.from("service_orders").insert({
       customer_id: vehicle.customer_id,
       vehicle_id: vehicle.id,
@@ -328,7 +334,7 @@ function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, 
       mileage: form.mileage ? Number(form.mileage) : null,
       reported_problem: form.reported_problem,
       diagnosis: form.diagnosis || null,
-      notes: form.notes || null,
+      notes: withDownPaymentNote(form.notes || null, downPayment),
       status: "aberta",
       ...totals,
     }).select().single();
@@ -356,7 +362,7 @@ function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, 
     if (form.mileage) await supabase.from("vehicles").update({ mileage: Number(form.mileage) }).eq("id", vehicle.id);
     setShowForm(false);
     setItems([{ ...emptyItem }]);
-    setForm({ vehicle_id: "", plate: "", entry_date: today(), expected_delivery_date: "", mileage: "", reported_problem: "", diagnosis: "", notes: "", discount: "0" });
+    setForm({ vehicle_id: "", plate: "", entry_date: today(), expected_delivery_date: "", mileage: "", reported_problem: "", diagnosis: "", notes: "", discount: "0", down_payment: "0" });
     onSaved();
   }
 
@@ -381,7 +387,7 @@ function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, 
           <datalist id="order-vehicle-plates">{vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.plate}>{vehicle.brand} {vehicle.model}</option>)}</datalist>
           {matchedVehicle ? <span className="text-xs font-semibold text-emerald-700">{matchedVehicle.brand} {matchedVehicle.model} • {matchedVehicle.customer?.name || "proprietário cadastrado"}</span> : form.plate.length >= 6 ? <span className="text-xs font-semibold text-red-600">Placa não cadastrada. Cadastre o veículo primeiro.</span> : <span className="text-xs font-medium text-[#7a828a]">Comece a digitar e selecione a placa cadastrada.</span>}
         </label>
-        <Input label="Data de entrada" type="date" required value={form.entry_date} onChange={(v) => setForm({ ...form, entry_date: v })} />
+        <Input label="Data de entrada do veículo" type="date" required value={form.entry_date} onChange={(v) => setForm({ ...form, entry_date: v })} />
         <Input label="Previsão de entrega" type="date" value={form.expected_delivery_date} onChange={(v) => setForm({ ...form, expected_delivery_date: v })} />
         <Input label="Quilometragem" type="number" value={form.mileage} onChange={(v) => setForm({ ...form, mileage: v })} />
       </div>
@@ -389,7 +395,7 @@ function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, 
       <div className="mt-7 flex items-center justify-between"><h2 className="font-black">Serviços e peças</h2><button type="button" onClick={() => setItems([...items, { ...emptyItem }])} className="text-sm font-black text-[#b91424]">+ Adicionar item</button></div>
       <div className="mt-3 hidden grid-cols-[150px_1fr_90px_140px_40px] gap-3 px-3 text-xs font-black uppercase tracking-wide text-[#7a828a] md:grid"><span>Tipo</span><span>Descrição</span><span>Qtd.</span><span>Preço unit. (R$)</span><span></span></div><div className="mt-2 space-y-3">{items.map((item, index) => <div key={index} className="grid gap-3 rounded-xl bg-[#f5f5f2] p-3 md:grid-cols-[150px_1fr_90px_140px_40px]"><select value={item.type} onChange={(e) => updateItem(index, "type", e.target.value)} className="rounded-lg border border-black/10 bg-white px-3"><option value="servico">Serviço</option><option value="mao_de_obra">Mão de obra</option><option value="peca">Peça</option></select><input placeholder="Descrição" value={item.description} onChange={(e) => updateItem(index, "description", e.target.value)} className="min-h-11 rounded-lg border border-black/10 px-3" /><input aria-label="Quantidade" type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateItem(index, "quantity", e.target.value)} className="rounded-lg border border-black/10 px-3" /><input aria-label="Preço unitário em reais" placeholder="Preço R$" type="number" min="0" step="0.01" value={item.unit_price} onChange={(e) => updateItem(index, "unit_price", e.target.value)} className="rounded-lg border border-black/10 px-3" /><button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))} className="grid place-items-center text-red-500"><X size={18} /></button></div>)}</div>
       <div className="mt-6 grid gap-4 sm:grid-cols-2"><label className="grid gap-2 text-sm font-bold">Diagnóstico<textarea rows={3} value={form.diagnosis} onChange={(e) => setForm({ ...form, diagnosis: e.target.value })} className="rounded-xl border border-black/10 p-3" /></label><label className="grid gap-2 text-sm font-bold">Observações<textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="rounded-xl border border-black/10 p-3" /></label></div>
-      <div className="mt-6 flex flex-col items-end gap-2 border-t border-black/8 pt-5"><Input label="Desconto" type="number" value={form.discount} onChange={(v) => setForm({ ...form, discount: v })} /><p className="text-sm text-[#6b737d]">Peças: {money(totals.parts_total)} • Serviços: {money(totals.labor_total)}</p><p className="text-2xl font-black">Total: {money(totals.total)}</p></div>
+      <div className="mt-6 border-t border-black/8 pt-5"><div className="ml-auto grid max-w-xl gap-4 sm:grid-cols-2"><Input label="Desconto (R$)" type="number" value={form.discount} onChange={(v) => setForm({ ...form, discount: v })} /><Input label="Entrada paga (R$)" type="number" value={form.down_payment} onChange={(v) => setForm({ ...form, down_payment: v })} /></div><div className="mt-4 text-right"><p className="text-sm text-[#6b737d]">Peças: {money(totals.parts_total)} • Serviços: {money(totals.labor_total)}</p><p className="mt-2 text-2xl font-black">Total: {money(totals.total)}</p><p className="mt-1 text-sm font-bold text-[#147d50]">Entrada paga: {money(downPayment)}</p><p className="mt-1 text-xl font-black text-[#b91424]">Saldo restante: {money(balanceDue)}</p></div></div>
       <div className="mt-6 flex gap-3"><button disabled={!matchedVehicle} className="rounded-xl bg-[#111820] px-5 py-3 font-black text-white disabled:cursor-not-allowed disabled:opacity-40">Criar ordem</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-black/10 px-5 py-3 font-bold">Cancelar</button></div>
     </form>}
 
@@ -398,7 +404,7 @@ function OrdersPanel({ orders, vehicles, presetVehicleId, clearPreset, onSaved, 
       <span className="text-sm font-semibold text-[#6b737d]">{filteredOrders.length} {filteredOrders.length === 1 ? "ordem encontrada" : "ordens encontradas"}</span>
     </div>
 
-    <div className="overflow-hidden rounded-2xl border border-black/8 bg-white"><div className="overflow-x-auto"><table className="w-full min-w-[850px] text-left"><thead className="bg-[#111820] text-sm text-white"><tr><th className="p-4">OS</th><th className="p-4">Data</th><th className="p-4">Veículo</th><th className="p-4">Cliente</th><th className="p-4">Status</th><th className="p-4">Total</th></tr></thead><tbody className="divide-y divide-black/7">{filteredOrders.map((o) => <tr key={o.id} onClick={() => onSelectOrder(o)} className="cursor-pointer hover:bg-black/[.02]"><td className="p-4 font-black">{o.order_number}</td><td className="p-4">{dateBR(o.entry_date)}</td><td className="p-4"><b>{o.vehicle?.plate}</b> • {o.vehicle?.model}</td><td className="p-4">{o.customer?.name}</td><td className="p-4"><Status status={o.status} /></td><td className="p-4 font-bold">{money(o.total)}</td></tr>)}</tbody></table></div>{filteredOrders.length === 0 && <Empty text={orderSearch ? "Nenhuma ordem encontrada para essa busca." : "Nenhuma ordem cadastrada."} />}</div>
+    <div className="overflow-hidden rounded-2xl border border-black/8 bg-white"><div className="overflow-x-auto"><table className="w-full min-w-[1050px] text-left"><thead className="bg-[#111820] text-sm text-white"><tr><th className="p-4">OS</th><th className="p-4">Data</th><th className="p-4">Veículo</th><th className="p-4">Cliente</th><th className="p-4">Status</th><th className="p-4">Total</th><th className="p-4">Entrada paga</th><th className="p-4">Saldo</th></tr></thead><tbody className="divide-y divide-black/7">{filteredOrders.map((o) => <tr key={o.id} onClick={() => onSelectOrder(o)} className="cursor-pointer hover:bg-black/[.02]"><td className="p-4 font-black">{o.order_number}</td><td className="p-4">{dateBR(o.entry_date)}</td><td className="p-4"><b>{o.vehicle?.plate}</b> • {o.vehicle?.model}</td><td className="p-4">{o.customer?.name}</td><td className="p-4"><Status status={o.status} /></td><td className="p-4 font-bold">{money(o.total)}</td><td className="p-4 font-bold text-emerald-700">{money(Number(o.down_payment || 0))}</td><td className="p-4 font-black text-[#b91424]">{money(Math.max(Number(o.total) - Number(o.down_payment || 0), 0))}</td></tr>)}</tbody></table></div>{filteredOrders.length === 0 && <Empty text={orderSearch ? "Nenhuma ordem encontrada para essa busca." : "Nenhuma ordem cadastrada."} />}</div>
   </>;
 }
 
@@ -408,12 +414,17 @@ function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order
   const [deleting, setDeleting] = useState(false);
   const deleteLock = useRef(false);
   const [deleteError, setDeleteError] = useState("");
+  const [downPayment, setDownPayment] = useState(String(Number(order.down_payment || 0)));
   const locked = order.status === "entregue";
   const shareReady = order.status === "concluida" || order.status === "entregue";
 
   useEffect(() => {
     setEditedItems((order.items || []).map((item) => ({ ...item })));
-  }, [order.items]);
+    setDownPayment(String(Number(order.down_payment || 0)));
+  }, [order.items, order.down_payment]);
+
+  const savedDownPayment = Number(order.down_payment || 0);
+  const savedBalanceDue = Math.max(Number(order.total) - savedDownPayment, 0);
 
   async function updateStatus(status: OrderStatus) {
     if (order.status === "entregue") return;
@@ -421,6 +432,22 @@ function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order
     const { error } = await supabase.from("service_orders").update({ status, completed_at }).eq("id", order.id);
     if (error) {
       onError("Não foi possível alterar o status.");
+      return;
+    }
+    onChanged();
+  }
+
+  async function saveDownPayment() {
+    if (locked) return;
+    const value = Number(downPayment || 0);
+    if (!Number.isFinite(value) || value < 0 || value > Number(order.total)) {
+      onError("A entrada paga deve estar entre R$ 0,00 e o total da ordem.");
+      return;
+    }
+    const notes = withDownPaymentNote(order.notes || null, value);
+    const { error } = await supabase.from("service_orders").update({ notes }).eq("id", order.id);
+    if (error) {
+      onError("Não foi possível salvar a entrada paga.");
       return;
     }
     onChanged();
@@ -467,6 +494,10 @@ function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order
     const subtotal = Number(item.quantity) * Number(item.unit_price);
     const nextItems = editedItems.map((current, i) => i === index ? { ...current, subtotal } : current);
     const totals = calculateTotals(nextItems, Number(order.discount));
+    if (totals.total < savedDownPayment) {
+      onError("O total da OS não pode ficar menor que a entrada já paga.");
+      return;
+    }
 
     const { error: itemError } = await supabase.from("service_order_items").update({
       type: item.type,
@@ -507,7 +538,7 @@ function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order
 
   async function shareWhatsapp() {
     if (!shareReady) return;
-    const message = `Olá! Segue a ${order.order_number} do veículo ${order.vehicle?.plate || ""}. Status: ${statusLabels[order.status]}. Valor: ${money(order.total)}.`;
+    const message = `Olá! Segue a ${order.order_number} do veículo ${order.vehicle?.plate || ""}. Status: ${statusLabels[order.status]}. Total: ${money(order.total)}. Entrada paga: ${money(savedDownPayment)}. Saldo restante: ${money(savedBalanceDue)}.`;
     const file = createOrderPdfFile(order);
 
     try {
@@ -534,7 +565,7 @@ function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order
   }
 
   return <div className="fixed inset-0 z-[70] bg-black/55 p-3 backdrop-blur-sm sm:p-6"><div className="ml-auto h-full w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl"><div className="sticky top-0 z-10 flex items-start justify-between border-b border-black/8 bg-white p-5 sm:p-7"><div><p className="text-sm font-bold text-[#b91424]">{order.order_number}</p><h2 className="mt-1 text-2xl font-black">{order.vehicle?.plate} • {order.vehicle?.brand} {order.vehicle?.model}</h2></div><button disabled={deleting} onClick={onClose} aria-label="Fechar"><X /></button></div>
-    <div className="p-5 sm:p-7"><div className="grid gap-4 rounded-2xl bg-[#f5f5f2] p-5 sm:grid-cols-3"><div><small>Cliente</small><p className="font-bold">{order.customer?.name}</p></div><div><small>Entrada</small><p className="font-bold">{dateBR(order.entry_date)}</p></div><div><small>Status</small><Status status={order.status} /></div></div>
+    <div className="p-5 sm:p-7"><div className="grid gap-4 rounded-2xl bg-[#f5f5f2] p-5 sm:grid-cols-3"><div><small>Cliente</small><p className="font-bold">{order.customer?.name}</p></div><div><small>Data de entrada do veículo</small><p className="font-bold">{dateBR(order.entry_date)}</p></div><div><small>Status</small><Status status={order.status} /></div></div>
       <div className="mt-6"><h3 className="font-black">Problema relatado</h3><p className="mt-2 leading-7 text-[#59626c]">{order.reported_problem}</p>{order.diagnosis && <><h3 className="mt-5 font-black">Diagnóstico</h3><p className="mt-2 leading-7 text-[#59626c]">{order.diagnosis}</p></>}</div>
 
       <div className="mt-7"><div className="flex items-center justify-between"><div><h3 className="font-black">Serviços, peças e preços</h3><p className="mt-1 text-sm text-[#6b737d]">Altere a quantidade ou o preço unitário e clique em Salvar. O total da OS é recalculado automaticamente.</p></div></div>
@@ -557,7 +588,8 @@ function OrderDetails({ order, onClose, onChanged, onDeleted, onError }: { order
       {!locked && <form onSubmit={addItem} className="mt-5 rounded-xl bg-[#fff4f0] p-4"><p className="mb-3 text-sm font-black">Adicionar novo item com preço</p><div className="grid gap-3 md:grid-cols-[130px_1fr_90px_140px_auto]"><select value={newItem.type} onChange={(e) => setNewItem({ ...newItem, type: e.target.value as ServiceItem["type"] })} className="rounded-lg border border-black/10 bg-white px-3"><option value="servico">Serviço</option><option value="mao_de_obra">Mão de obra</option><option value="peca">Peça</option></select><input required placeholder="Descrição" value={newItem.description} onChange={(e) => setNewItem({ ...newItem, description: e.target.value })} className="min-h-11 rounded-lg border border-black/10 px-3" /><input aria-label="Quantidade" title="Quantidade" type="number" min=".01" step=".01" value={newItem.quantity} onChange={(e) => setNewItem({ ...newItem, quantity: Number(e.target.value) })} className="rounded-lg border border-black/10 px-3" /><input aria-label="Preço unitário em reais" title="Preço unitário em reais" placeholder="R$" type="number" min="0" step=".01" value={newItem.unit_price} onChange={(e) => setNewItem({ ...newItem, unit_price: Number(e.target.value) })} className="rounded-lg border border-black/10 px-3" /><button className="rounded-lg bg-[#b91424] px-4 font-black text-white">Adicionar</button></div><p className="mt-2 text-right text-sm font-bold">Subtotal: {money(Number(newItem.quantity) * Number(newItem.unit_price))}</p></form>}
 
       {locked && <p className="mt-5 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-800">Esta ordem foi entregue e sua edição está bloqueada. Crie uma nova OS para registrar outro atendimento.</p>}
-      <div className="mt-7 flex items-end justify-between border-t border-black/8 pt-6"><div className="flex flex-wrap gap-2">{order.status === "concluida" && <button onClick={() => updateStatus("em_andamento")} className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800">Reabrir ordem</button>}{!locked && <select value={order.status} onChange={(e) => updateStatus(e.target.value as OrderStatus)} className="rounded-xl border border-black/10 px-3 py-2 text-sm font-bold">{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>}</div><div className="text-right"><p className="text-sm text-[#6b737d]">Total da ordem</p><p className="text-3xl font-black">{money(order.total)}</p></div></div>
+      <div className="mt-7 rounded-2xl border border-black/8 bg-[#f8f8f6] p-5"><div className="grid gap-4 sm:grid-cols-3"><div><p className="text-xs font-black uppercase tracking-wide text-[#6b737d]">Total da OS</p><p className="mt-1 text-2xl font-black">{money(order.total)}</p></div><div><p className="text-xs font-black uppercase tracking-wide text-[#6b737d]">Entrada paga</p><p className="mt-1 text-2xl font-black text-emerald-700">{money(savedDownPayment)}</p></div><div><p className="text-xs font-black uppercase tracking-wide text-[#6b737d]">Saldo restante</p><p className="mt-1 text-2xl font-black text-[#b91424]">{money(savedBalanceDue)}</p></div></div>{!locked && <div className="mt-5 flex flex-col gap-3 border-t border-black/8 pt-5 sm:flex-row sm:items-end"><label className="grid flex-1 gap-2 text-sm font-bold">Alterar entrada paga (R$)<input type="number" min="0" step="0.01" max={Number(order.total)} value={downPayment} onChange={(e) => setDownPayment(e.target.value)} className="min-h-11 rounded-xl border border-black/10 bg-white px-3" /></label><button type="button" onClick={() => void saveDownPayment()} className="min-h-11 rounded-xl bg-[#147d50] px-5 text-sm font-black text-white">Salvar entrada</button></div>}</div>
+      <div className="mt-7 flex items-end justify-between border-t border-black/8 pt-6"><div className="flex flex-wrap gap-2">{order.status === "concluida" && <button onClick={() => updateStatus("em_andamento")} className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-black text-amber-800">Reabrir ordem</button>}{!locked && <select value={order.status} onChange={(e) => updateStatus(e.target.value as OrderStatus)} className="rounded-xl border border-black/10 px-3 py-2 text-sm font-bold">{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>}</div><div className="text-right"><p className="text-sm text-[#6b737d]">Saldo a receber</p><p className="text-3xl font-black">{money(savedBalanceDue)}</p></div></div>
 
       <div className="mt-7 grid gap-3 sm:grid-cols-2"><button onClick={() => downloadOrderPdf(order)} className="flex items-center justify-center gap-2 rounded-xl bg-[#111820] px-5 py-3 font-black text-white"><FileDown size={18} /> Baixar PDF</button><button disabled={!shareReady} onClick={() => void shareWhatsapp()} className="flex items-center justify-center gap-2 rounded-xl border border-black/10 px-5 py-3 font-black disabled:cursor-not-allowed disabled:bg-black/[.03] disabled:text-black/35"><Share2 size={18} /> {shareReady ? "Compartilhar PDF no WhatsApp" : "Conclua a OS para compartilhar"}</button></div>
       {!shareReady && <p className="mt-2 text-center text-xs font-semibold text-[#7a828a]">O compartilhamento é liberado quando a ordem estiver como Concluída ou Entregue.</p>}
@@ -583,6 +615,33 @@ function Select({ label, value, onChange, options, required = false }: { label: 
   return <label className="grid gap-2 text-sm font-bold">{label}<select required={required} value={value} onChange={(e) => onChange(e.target.value)} className="min-h-11 rounded-xl border border-black/10 bg-white px-3"><option value="">Selecione</option>{options.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>;
 }
 function Empty({ text }: { text: string }) { return <p className="col-span-full py-10 text-center text-sm text-[#7a828a]">{text}</p>; }
+const DOWN_PAYMENT_NOTE = /(?:^|\n)\[\[LH_DOWN_PAYMENT:([0-9]+(?:\.[0-9]{1,2})?)\]\](?:\n|$)/g;
+
+function readDownPayment(order: { down_payment?: number; notes?: string | null }) {
+  let marked: number | null = null;
+  const notes = order.notes || "";
+  for (const match of notes.matchAll(DOWN_PAYMENT_NOTE)) {
+    const value = Number(match[1]);
+    if (Number.isFinite(value) && value >= 0) marked = value;
+  }
+  DOWN_PAYMENT_NOTE.lastIndex = 0;
+  if (marked !== null) return marked;
+  const direct = Number(order.down_payment || 0);
+  return Number.isFinite(direct) && direct >= 0 ? direct : 0;
+}
+
+function withDownPayment(order: ServiceOrder): ServiceOrder {
+  return { ...order, down_payment: readDownPayment(order) };
+}
+
+function withDownPaymentNote(notes: string | null, value: number) {
+  DOWN_PAYMENT_NOTE.lastIndex = 0;
+  const clean = (notes || "").replace(DOWN_PAYMENT_NOTE, "\n").trim();
+  DOWN_PAYMENT_NOTE.lastIndex = 0;
+  const marker = `[[LH_DOWN_PAYMENT:${Math.max(0, value).toFixed(2)}]]`;
+  return clean ? `${clean}\n${marker}` : marker;
+}
+
 function calculateTotals(items: ServiceItem[], discount: number) {
   const parts_total = items.filter((i) => i.type === "peca").reduce((sum, i) => sum + Number(i.quantity) * Number(i.unit_price), 0);
   const labor_total = items.filter((i) => i.type !== "peca").reduce((sum, i) => sum + Number(i.quantity) * Number(i.unit_price), 0);
